@@ -1,0 +1,222 @@
+'use client';
+import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { Check, ChevronRight, Hand, Highlighter, LoaderCircle, MessageSquarePlus, Pencil, Scan, Sparkles, Trash2, X } from 'lucide-react';
+import type { Material, Reference } from '@/lib/types';
+import { studyPresets, studyQuestionBody, studyDestination, studyDestinationNames, type StudyDestination, type StudyPreset, type AnnotationAnchor, type MaterialAnnotation, type MaterialStudyTask, type PreviewSelection } from '@/lib/material-study';
+import type { OriginalQuestion } from '@/lib/question-bank-types';
+import type { PracticeArea } from '@/lib/practice-hub';
+import type { QuestionImportReport } from '@/lib/material-auto-import';
+import { referenceLocation } from '@/lib/document-labels';
+import { OriginalFilePreview } from './original-file-preview';
+import type { NotebookStore } from './use-notebook';
+import { Button } from './ui/button';
+import { Modal } from './ui/modal';
+import { AnnotationPresetPicker, annotationPreset } from './annotation-preset-picker';
+import SpotlightCard from './react-bits/SpotlightCard';
+import { aiAssistantText } from '@/lib/ai-assistant';
+
+async function request<T>(url:string,body?:object,method='POST'):Promise<T> {
+  const response=await fetch(url,body?{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{cache:'no-store'});
+  const result=await response.json();if(!response.ok)throw new Error(aiAssistantText(result.error??'操作暂未完成，请重试。'));return result;
+}
+type Edit={title:string;body:string;excluded?:boolean;destination?:StudyDestination;question?:Pick<OriginalQuestion,'prompt'|'answer'|'explanation'>};
+type OrganizeGroup={preset:StudyPreset;materialIds:string[];annotationIds:string[]};
+type OrganizeSelection=OrganizeGroup&{mode:'material'|'annotations';routing?:'auto';taskId?:string;names:string[];groups?:OrganizeGroup[]};
+function AnnotationQuote({quote,draft=false}:{quote:string;draft?:boolean}) {
+  const text=useRef<HTMLElement|null>(null),contentId=useId();
+  const [expanded,setExpanded]=useState(false),[truncated,setTruncated]=useState(false);
+  useEffect(()=>{
+    const element=text.current;if(!element||expanded)return;
+    const measure=()=>setTruncated(element.scrollHeight>element.clientHeight+1);measure();
+    const observer=new ResizeObserver(measure);observer.observe(element);return()=>observer.disconnect();
+  },[quote,expanded,draft]);
+  const paragraphs=draft?quote.replace(/(?=【[^】\n]{1,24}】)/g,'\n').split(/\n+/).map(part=>part.trim()).filter(Boolean):[];
+  return <div className={`annotation-quote${expanded?' is-expanded':''}`}>
+    {draft?<div ref={element=>{text.current=element;}} id={contentId} className="study-draft-body">{paragraphs.map((paragraph,index)=>{const label=paragraph.match(/^【[^】]+】/);return <p key={index}>{label?<><strong>{label[0]}</strong>{paragraph.slice(label[0].length)}</>:paragraph}</p>;})}</div>:<span ref={element=>{text.current=element;}} id={contentId}>{quote||'图片选区'}</span>}
+    {truncated&&<button type="button" aria-controls={contentId} aria-expanded={expanded} onClick={()=>setExpanded(value=>!value)}>{expanded?'收起':'查看更多'}</button>}
+  </div>;
+}
+type Props={courseId:string;material:Material;materials:Material[];reference?:Reference;initialPage?:number;notebook:NotebookStore;onReference:(reference:Reference)=>void;onNotebook:(pageId:string)=>void;onPractice:(materialId:string,section?:PracticeArea)=>void;onReload:()=>Promise<unknown>};
+export function MaterialStudyReader({courseId,material,materials,reference,initialPage=1,notebook,onReference,onNotebook,onPractice,onReload}:Props) {
+  const scope=useRef<HTMLDivElement>(null);
+  const [width,setWidth]=useState(0),[open,setOpen]=useState(false),[tab,setTab]=useState<'annotations'|'drafts'>('annotations');
+  const [reviewWidth,setReviewWidth]=useState(360),draggingReview=useRef(false),reviewWidthKey=`lms.study.review-width:${courseId}`;
+  const maxReviewWidth=Math.max(280,width-332),paneWidth=Math.min(maxReviewWidth,Math.max(280,reviewWidth));
+  const [mode,setMode]=useState<'browse'|'pan'|'text'|'region'>('browse'),[annotations,setAnnotations]=useState<MaterialAnnotation[]>([]),[selected,setSelected]=useState<string[]>([]);
+  const [hovered,setHovered]=useState<MaterialAnnotation|null>(null);
+  const hoverExit=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const [editor,setEditor]=useState<{materialId:string;selection:PreviewSelection;annotation?:MaterialAnnotation;instruction:string;confirmed:boolean}|null>(null);
+  const [tasks,setTasks]=useState<MaterialStudyTask[]>([]),[taskId,setTaskId]=useState(''),[edits,setEdits]=useState<Record<string,Edit>>({});
+  const [editingSection,setEditingSection]=useState('');
+  const [imports,setImports]=useState<QuestionImportReport[]>([]);
+  const [busy,setBusy]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState(''),[referenceStale,setReferenceStale]=useState(false);
+  const [consent,setConsent]=useState<OrganizeSelection|null>(null),[adopting,setAdopting]=useState(false),[target,setTarget]=useState('new'),[chapterTitle,setChapterTitle]=useState('资料整理');
+  const [access,setAccess]=useState<{configured:boolean;withheldMaterials:string[]}|null>(null),[accessError,setAccessError]=useState('');
+  const epoch=useRef(0),selectionEpoch=useRef(0),dirty=useRef(false),editRef=useRef(edits),tasksRef=useRef(tasks),initializedImports=useRef(new Set<string>());
+  editRef.current=edits;tasksRef.current=tasks;
+  const materialTasks=tasks.filter(item=>item.materialIds.includes(material.id));
+  const task=materialTasks.find(item=>item.id===taskId),running=materialTasks.some(item=>item.state==='queued'||item.state==='running');
+  const materialSections=(current:MaterialStudyTask)=>current.sections.filter(section=>section.refs.some(ref=>ref.materialId===material.id));
+  const sections=task?materialSections(task):[];
+  const annotationUrl=`/api/materials/${encodeURIComponent(material.id)}/annotations`;
+  const materialAnnotations=annotations.filter(item=>item.materialId===material.id);
+  const eligible=materialAnnotations.filter(item=>!item.stale&&item.confirmedText&&item.refs.length);
+  const taskProtected=!!task&&(!!task.withheld||task.materialIds.some(id=>access?.withheldMaterials.includes(id)));
+  const chosen=taskProtected?[]:sections.filter(section=>!(edits[section.id]?.excluded??section.excluded)).map(section=>({...section,destination:edits[section.id]?.destination??studyDestination(section)}));
+  const taskBusy=task?.state==='queued'||task?.state==='running';
+  const selectedAnnotations=eligible.filter(item=>selected.includes(item.id));
+  const previewAnnotation=open&&tab==='annotations'&&!editor&&!busy?(hovered?.materialId===material.id?hovered:materialAnnotations.find(item=>item.id===selected.at(-1)&&!item.stale)??null):null;
+  const showAnnotations=mode==='text'||mode==='region'||!!editor||!!previewAnnotation||open&&(tab==='drafts'||mode!=='pan');
+  const previewMaterial=previewAnnotation?materials.find(item=>item.id===previewAnnotation.materialId)??material:material;
+  const selectedProtected=selectedAnnotations.some(item=>access?.withheldMaterials.includes(item.materialId));
+  const unavailable=!access?accessError||'正在读取 AI 整理状态…':selectedProtected?'所选资料有未交卷考试，交卷后再整理。':!access.configured?'尚未配置 AI 整理服务，批注仍可保存。':'';
+  const consentBlocked=!access||!access.configured||!!consent?.materialIds.some(id=>access.withheldMaterials.includes(id));
+  useEffect(()=>{const element=scope.current;if(!element)return;const measure=()=>setWidth(element.clientWidth);measure();const observer=new ResizeObserver(measure);observer.observe(element);return()=>observer.disconnect();},[]);
+  useEffect(()=>{try{const saved=Number(localStorage.getItem(reviewWidthKey)??'360');setReviewWidth(Number.isFinite(saved)&&saved>=280?saved:360);}catch{/* Use the default reading layout. */}},[reviewWidthKey]);
+  useEffect(()=>()=>{if(hoverExit.current)clearTimeout(hoverExit.current);},[]);
+  function showAnnotationPreview(annotation:MaterialAnnotation){if(annotation.stale||editor||busy)return;if(hoverExit.current)clearTimeout(hoverExit.current);hoverExit.current=null;setHovered(annotation);}
+  function hideAnnotationPreview(){if(hoverExit.current)clearTimeout(hoverExit.current);hoverExit.current=setTimeout(()=>{setHovered(null);hoverExit.current=null;},120);}
+  function resizeReview(value:number){const next=Math.round(Math.min(maxReviewWidth,Math.max(280,value)));setReviewWidth(next);try{localStorage.setItem(reviewWidthKey,String(next));}catch{/* Preserve this visit's layout. */}}
+  useEffect(()=>{setSelected([]);setAnnotations([]);setConsent(null);setAdopting(false);setNotice('');},[material.id]);
+  const mergeTask=useCallback((next:MaterialStudyTask)=>setTasks(items=>[next,...items.filter(item=>item.id!==next.id)]),[]);
+  useEffect(()=>{
+    const turn=++epoch.current;selectionEpoch.current++;setMode('browse');setHovered(null);setError('');setReferenceStale(false);setEditor(old=>old?.materialId===material.id?old:null);setBusy(old=>old==='识别选区文字'?'':old);
+    void request<{annotations:MaterialAnnotation[];sourceHash:string}>(annotationUrl).then(result=>{if(turn===epoch.current){setAnnotations(result.annotations??[]);setReferenceStale(!!reference?.sourceHash&&!!result.sourceHash&&reference.sourceHash!==result.sourceHash);}}).catch(reason=>{if(turn===epoch.current)setError(reason.message);});
+  },[annotationUrl,reference?.sourceHash]);
+  useEffect(()=>{let alive=true;setTaskId('');void request<{tasks:MaterialStudyTask[]}>(`/api/generation?action=study-list&courseId=${encodeURIComponent(courseId)}&materialId=${encodeURIComponent(material.id)}`).then(result=>{if(alive){const current=(result.tasks??[]).filter(item=>item.materialIds.includes(material.id));setTasks(current);setTaskId(current[0]?.id??'');}}).catch(reason=>{if(alive)setError(reason.message);});return()=>{alive=false;};},[courseId,material.id]);
+  useEffect(()=>{let alive=true;const read=()=>void request<{configured:boolean;withheldMaterials:string[]}>(`/api/practice-hub?courseId=${encodeURIComponent(courseId)}&section=knowledge`).then(result=>{if(alive){setAccess({configured:result.configured,withheldMaterials:result.withheldMaterials});setAccessError('');}}).catch(()=>{if(alive){setAccess(null);setAccessError('AI 整理状态暂不可用，请重新打开批注栏重试。');}});read();const timer=open?setInterval(read,4000):undefined;return()=>{alive=false;if(timer)clearInterval(timer);};},[courseId,open]);
+  useEffect(()=>{
+    dirty.current=false;let restored:Record<string,Edit>={};if(!taskProtected)try{restored=JSON.parse(localStorage.getItem(`lms.study.draft:${taskId}`)??'{}');}catch{/* Server drafts remain available. */}
+    setEdits(restored);setEditingSection('');dirty.current=!!task&&materialSections(task).some(section=>!!restored[section.id]);
+  },[taskId,taskProtected,material.id]);
+  useEffect(()=>{
+    let alive=true;const read=async()=>{
+      try{const result=await request<{imports:QuestionImportReport[]}>(`/api/question-banks?courseId=${encodeURIComponent(courseId)}`);if(!alive)return;setImports(result.imports??[]);
+        const ids=materials.filter(item=>!item.excluded&&!item.conflictResolution&&item.status!=='review'&&!initializedImports.current.has(item.id)&&!result.imports?.some(report=>report.materialId===item.id)).map(item=>item.id);
+        if(ids.length){ids.forEach(id=>initializedImports.current.add(id));await request('/api/question-banks',{action:'auto-import',courseId,materialIds:ids,read:true});}
+      }catch(reason){if(alive)setError(reason instanceof Error?reason.message:'原题导入状态暂不可用。');}
+    };void read();const timer=setInterval(()=>void read(),4000);return()=>{alive=false;clearInterval(timer);};
+    // Material IDs determine the initial import; polling also restores interrupted tasks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[courseId,materials.map(item=>item.id).join(',')]);
+  useEffect(()=>{
+    if(!running&&!open)return;let alive=true;const read=()=>{void request<{tasks:MaterialStudyTask[]}>(`/api/generation?action=study-list&courseId=${encodeURIComponent(courseId)}&materialId=${encodeURIComponent(material.id)}`).then(result=>{if(alive){const current=result.tasks.filter(item=>item.materialIds.includes(material.id));setTasks(current);setTaskId(previous=>current.some(item=>item.id===previous)?previous:current[0]?.id??'');}}).catch(reason=>{if(alive)setError(reason.message);});};const timer=setInterval(read,1800);return()=>{alive=false;clearInterval(timer);};
+  },[running,open,courseId,material.id]);
+  async function perform(label:string,operation:()=>Promise<void>){if(busy)return;setBusy(label);setError('');try{await operation();}catch(reason){setError(reason instanceof Error?reason.message:'操作未完成，请重试。');if(!editor)setOpen(true);}finally{setBusy('');}}
+  function cancelAnnotation(){if(busy==='保存批注')return;selectionEpoch.current++;setEditor(null);setMode('browse');setBusy('');setError('');setNotice('');scope.current?.querySelector<HTMLButtonElement>(mode==='pan'?'[aria-label="拖拽浏览"]':'[aria-label="批注"]')?.focus();}
+  async function pick(selection:PreviewSelection){
+    const turn=++selectionEpoch.current;setMode('browse');setHovered(null);setOpen(!selection.rects.length);setTab('annotations');setError('');setNotice('');setEditor({materialId:material.id,selection,instruction:studyPresets.notes.description,confirmed:selection.kind==='text'});
+    if(selection.kind!=='region'||!selection.image)return;
+    setBusy('识别选区文字');
+    try {
+      const result=await request<{text:string;confidence:number}>(annotationUrl,{action:'recognize',image:selection.image});if(turn!==selectionEpoch.current)return;
+      const ocrText=result.text.trim().slice(0,16000),sourceText=selection.quote;
+      const comparable=(text:string)=>text.replace(/\s+/g,'').replace(/（/g,'(').replace(/）/g,')').replace(/[，、。：；,.:;]/g,'');
+      const conflict=!!sourceText&&!!ocrText&&comparable(sourceText)!==comparable(ocrText),confirmed=sourceText?!conflict:!ocrText||result.confidence>=85;
+      setEditor(old=>old&&old.materialId===material.id?{...old,selection:{...old.selection,quote:sourceText||ocrText,recognition:{sourceText,ocrText,confidence:result.confidence}},confirmed}:old);
+      setNotice(conflict?'原文与识别文字有差异，请核对后再用于整理。':!confirmed?'部分文字识别不清，请核对后再用于整理。':'选区已读取，截图与文字会一同用于整理。');
+    } catch(reason){if(turn===selectionEpoch.current){setEditor(old=>old?{...old,confirmed:!!selection.quote||!!selection.image}:old);setNotice(`文字识别暂未完成，原文与截图已保留。${reason instanceof Error?reason.message:''}`);}}
+    finally {if(turn===selectionEpoch.current)setBusy('');}
+  }
+  async function saveAnnotation(){if(!editor)return;const result=await request<{annotation:MaterialAnnotation}>(`/api/materials/${editor.materialId}/annotations`,{anchor:editor.selection,instruction:editor.instruction,confirmedText:editor.confirmed,...(editor.selection.image?{image:editor.selection.image}:{}),...(editor.annotation?{id:editor.annotation.id,revision:editor.annotation.revision}:{})},editor.annotation?'PATCH':'POST');setAnnotations(items=>[...items.filter(item=>item.id!==result.annotation.id),result.annotation].sort((a,b)=>a.createdAt.localeCompare(b.createdAt)));if(result.annotation.confirmedText&&result.annotation.refs.length)setSelected(ids=>[...new Set([...ids,result.annotation.id])]);setEditor(null);setNotice('批注已保存，可继续批注或统一整理。');}
+  function locate(annotation:MaterialAnnotation){const ref=annotation.refs[0]??{materialId:annotation.materialId,name:annotation.name,page:annotation.anchor.page??annotation.anchor.displayPage??1,snippet:annotation.anchor.quote,location:annotation.anchor.kind==='region'&&!annotation.anchor.page?'image' as const:/\.(docx|txt)$/i.test(annotation.name)?'paragraph' as const:/\.pptx$/i.test(annotation.name)?'slide' as const:/\.(png|jpe?g|webp)$/i.test(annotation.name)?'image' as const:'page' as const,sourceHash:annotation.sourceHash};onReference({...ref,anchor:{quote:annotation.anchor.quote,prefix:annotation.anchor.prefix,suffix:annotation.anchor.suffix,rects:annotation.anchor.rects,displayPage:annotation.anchor.displayPage}});setEditor({materialId:annotation.materialId,selection:annotation.anchor,annotation,instruction:annotation.instruction,confirmed:annotation.confirmedText});setOpen(true);setTab('annotations');}
+  async function organize(input:OrganizeSelection){
+    const {names,groups,...selection}=input;void names;
+    for(const group of groups??[selection]){const result=await request<{task:MaterialStudyTask}>('/api/generation',{action:'study-organize',courseId,...selection,...group,confirmed:true});mergeTask(result.task);setTaskId(result.task.id);}
+    setTab('drafts');setOpen(true);setConsent(null);setNotice('整理任务已保存，可以继续阅读。');
+  }
+  function startOrganize(input:{mode:'material'|'annotations';taskId?:string}){
+    const saved=input.taskId?materialTasks.find(item=>item.id===input.taskId):undefined,annotationIds=saved?.annotationIds??(input.mode==='annotations'?selectedAnnotations.map(item=>item.id):[]),materialIds=saved?.materialIds??(input.mode==='annotations'?[...new Set(selectedAnnotations.map(item=>item.materialId))]:[material.id]),groups:OrganizeGroup[]=[];
+    if(input.mode==='annotations'&&!saved)for(const annotation of selectedAnnotations){
+      const preset=annotationPreset(annotation.instruction)??'notes';let group=groups.find(item=>item.preset===preset);
+      if(!group){group={preset,annotationIds:[],materialIds:[]};groups.push(group);}
+      group.annotationIds.push(annotation.id);if(!group.materialIds.includes(annotation.materialId))group.materialIds.push(annotation.materialId);
+    }
+    setError('');setConsent({...input,...(saved?.routing||!saved&&input.mode==='material'?{routing:'auto' as const}:{}),preset:saved?.preset??groups[0]?.preset??'notes',annotationIds,materialIds,...(groups.length>1?{groups}:{}),names:materialIds.map(id=>materials.find(item=>item.id===id)?.name??annotations.find(item=>item.materialId===id)?.name??'所选资料')});
+  }
+  function changeEdit(id:string,patch:Partial<Edit>){const section=task?.sections.find(item=>item.id===id);if(!section)return;setEdits(items=>{const next={...items,[id]:{...(items[id]??{title:section.title,body:section.body,excluded:section.excluded}),...patch}};editRef.current=next;dirty.current=true;try{localStorage.setItem(`lms.study.draft:${taskId}`,JSON.stringify(next));}catch{/* Explicit save still writes the server draft. */}return next;});}
+  function changeQuestion(id:string,patch:Partial<Pick<OriginalQuestion,'prompt'|'answer'|'explanation'>>){const original=task?.sections.find(section=>section.id===id)?.question;if(!original)return;const question={prompt:original.prompt,answer:original.answer,explanation:original.explanation,...edits[id]?.question,...patch};changeEdit(id,{question,body:studyQuestionBody({...original,...question})});}
+  async function saveDraft(){const current=tasksRef.current.find(item=>item.id===taskId);if(!current)throw new Error('草稿不存在。');if(!dirty.current)return current;const changes=Object.entries(editRef.current).filter(([id])=>materialSections(current).some(section=>section.id===id&&section.review!=='adopted')).map(([id,edit])=>({id,...edit}));if(!changes.length)return current;const result=await request<{task:MaterialStudyTask}>('/api/generation',{action:'study-edit',courseId,taskId,revision:current.revision,edits:changes},'PATCH');mergeTask(result.task);dirty.current=false;const remaining={...editRef.current};for(const change of changes)delete remaining[change.id];editRef.current=remaining;setEdits(remaining);try{if(Object.keys(remaining).length)localStorage.setItem(`lms.study.draft:${taskId}`,JSON.stringify(remaining));else localStorage.removeItem(`lms.study.draft:${taskId}`);}catch{/* The saved draft is persisted on the server. */}setNotice('草稿已保存，内容修改后需重新审核。');return result.task;}
+  async function approve(){const current=await saveDraft();const ids=materialSections(current).filter(section=>!section.excluded&&section.review!=='adopted').map(section=>section.id);if(!ids.length)return;const result=await request<{task:MaterialStudyTask}>('/api/generation',{action:'study-edit',courseId,taskId,revision:current.revision,approveIds:ids},'PATCH');mergeTask(result.task);setNotice('审核通过，确认收录后才会添加。');}
+  async function adopt(){const current=await saveDraft();const approved=materialSections(current).filter(section=>!section.excluded&&section.review==='approved'),knowledge=approved.filter(section=>studyDestination(section)==='notebook');if(!approved.length)throw new Error('请先审核通过所选内容。');let notebookRevision:number|undefined;if(knowledge.length){if(!await notebook.flush('收录前保存个人笔记'))throw new Error('个人笔记尚未同步，请先保存或处理同步冲突。');const data=notebook.getCurrent();if(!data)throw new Error('活页暂未读取，请稍后重试。');notebookRevision=data.revision;}const targets=knowledge.map(section=>({sectionId:section.id,...(target.startsWith('page:')?{pageId:target.slice(5)}:target.startsWith('chapter:')?{chapterId:target.slice(8)}:{chapterTitle:chapterTitle.trim()||'资料整理'})}));const result=await request<{task:MaterialStudyTask}>('/api/generation',{action:'study-adopt',courseId,taskId,revision:current.revision,chosenIds:approved.map(section=>section.id),...(notebookRevision?{notebookRevision}:{}),targets});mergeTask(result.task);if(knowledge.length)await notebook.reload();await onReload();setAdopting(false);setNotice(`已收录 ${approved.length} 项内容。`);}
+  const approvedKnowledge=chosen.filter(section=>section.review==='approved'&&section.destination==='notebook'),approvedQuestions=chosen.filter(section=>section.review==='approved'&&section.destination!=='notebook');
+  const destinations=[...new Set(chosen.map(section=>section.destination))],adoptLabel=destinations.length>1?'收录所选内容':destinations[0]==='notebook'||!destinations.length?'收录到活页':'收录到'+studyDestinationNames[destinations[0]];
+  const approvedLocations=(Object.keys(studyDestinationNames) as StudyDestination[]).map(destination=>({destination,count:chosen.filter(section=>section.review==='approved'&&section.destination===destination).length})).filter(item=>item.count);
+  const report=imports.find(item=>item.materialId===material.id);
+  const anchor:AnnotationAnchor|undefined=!referenceStale&&reference?.anchor?{kind:reference.location==='image'?'region':'text',page:reference.location==='paragraph'||reference.location==='image'?undefined:reference.page,displayPage:reference.anchor.displayPage,quote:reference.anchor.quote,prefix:reference.anchor.prefix??'',suffix:reference.anchor.suffix??'',rects:reference.anchor.rects??[]}:undefined;
+  const review=<div className="material-review-body">
+    <div className="material-review-tabs" role="tablist" aria-label="学习整理"><button role="tab" type="button" aria-selected={tab==='annotations'} onClick={()=>setTab('annotations')}>批注 <small>{materialAnnotations.length}</small></button><button role="tab" type="button" aria-selected={tab==='drafts'} onClick={()=>setTab('drafts')}>草稿 <small>{materialTasks.length}</small></button></div>
+    {error&&<p className="material-study-error" role="alert">{error}</p>}{notice&&<p className="material-study-notice" role="status">{notice}</p>}
+    {tab==='annotations'?<>
+      {editor&&<form className="material-annotation-editor" onSubmit={event=>{event.preventDefault();void perform('保存批注',saveAnnotation);}}>
+        <div><strong>{editor.annotation?'编辑批注':`批注 ${materialAnnotations.length+1}`}</strong><Button size="icon" variant="ghost" aria-label="取消编辑批注" onClick={cancelAnnotation}><X size={15}/></Button></div><small>{materials.find(item=>item.id===editor.materialId)?.name}</small>
+        {editor.selection.kind==='region'?<>
+          {(editor.selection.image||editor.annotation?.hasImage)&&<img className="annotation-crop" src={editor.selection.image??`/api/materials/${editor.materialId}/annotations?image=${editor.annotation!.id}`} alt="所选原文件区域"/>}
+          <details className="annotation-recognition" open={!editor.confirmed}><summary>识别详情{editor.confirmed?'':' · 需要核对'}</summary>
+            <label>核对选区文字<textarea aria-label="核对选区文字" maxLength={16000} disabled={busy==='识别选区文字'} value={editor.selection.quote} onChange={event=>setEditor({...editor,selection:{...editor.selection,quote:event.target.value},confirmed:false})}/></label>
+            {editor.selection.recognition&&<><small>图片识别 · 置信度 {Math.round(editor.selection.recognition.confidence)}%</small><blockquote>{editor.selection.recognition.ocrText||'未提取出文字，将结合选区图片理解内容。'}</blockquote></>}
+            <label className="study-check"><input type="checkbox" checked={editor.confirmed} disabled={!!busy||!editor.selection.quote.trim()&&!editor.selection.image&&!editor.annotation?.hasImage} onChange={event=>setEditor({...editor,confirmed:event.target.checked})}/>{editor.selection.quote?'确认使用当前文字':'使用选区图片进行整理'}</label>
+          </details>
+        </>:<blockquote>{editor.selection.quote}</blockquote>}
+        <AnnotationPresetPicker instruction={editor.instruction} disabled={!!busy} onChange={instruction=>setEditor({...editor,instruction})}/><Button variant="primary" size="sm" disabled={!!busy||!editor.instruction.trim()} type="submit">保存批注</Button><small>保存后不会立即调用 AI。</small>
+      </form>}
+      {!editor&&<><div className="study-batch-heading"><span>当前资料</span><label><input type="checkbox" aria-label="选择全部可整理批注" checked={!!eligible.length&&eligible.every(item=>selected.includes(item.id))} onChange={event=>setSelected(event.target.checked?eligible.map(item=>item.id):[])}/>全选</label></div>
+      {!materialAnnotations.length&&<div className="study-empty"><Highlighter size={25}/><p>在原文中选中文字或框选区域，再选择一种批注预设。</p></div>}
+      {materialAnnotations.map((annotation,index)=>{const kind=annotationPreset(annotation.instruction);return <article className={`study-annotation${annotation.stale?' is-stale':''}${selected.includes(annotation.id)?' is-selected':''}${previewAnnotation?.id===annotation.id?' is-previewing':''}`} key={annotation.id} onMouseEnter={()=>showAnnotationPreview(annotation)} onMouseLeave={hideAnnotationPreview} onFocus={()=>showAnnotationPreview(annotation)} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))hideAnnotationPreview();}}>
+        <SpotlightCard className="study-annotation-card" spotlightColor="var(--theme-secondary)" intensity={.25} borderGlow={.15} proximity={0} flare={false}>
+          <header><label><input aria-label={`选择批注 ${index+1}`} type="checkbox" checked={selected.includes(annotation.id)} disabled={!eligible.some(item=>item.id===annotation.id)} onChange={event=>setSelected(ids=>event.target.checked?[...ids,annotation.id]:ids.filter(id=>id!==annotation.id))}/><b>{index+1}</b><strong>批注 {index+1}</strong></label><span className="annotation-card-actions"><Button size="icon" variant="ghost" aria-label={`编辑批注 ${index+1}`} title="编辑批注" disabled={!!busy} onClick={()=>locate(annotation)}><Pencil size={14}/></Button><Button size="icon" variant="ghost" aria-label={`删除批注 ${index+1}`} title="删除批注" disabled={!!busy} onClick={()=>void perform('删除批注',async()=>{await request(`/api/materials/${annotation.materialId}/annotations`,{id:annotation.id,revision:annotation.revision},'DELETE');setAnnotations(items=>items.filter(item=>item.id!==annotation.id));setSelected(ids=>ids.filter(id=>id!==annotation.id));setHovered(null);})}><Trash2 size={14}/></Button></span></header>
+          <AnnotationQuote quote={annotation.anchor.quote}/>
+          <p className="annotation-instruction"><span>整理选项</span><strong>{kind?studyPresets[kind].label:'未选择整理选项'}</strong></p>
+          {annotation.stale?<small className="study-warning">原文件或识别文字已变化，请重新定位；批注已保留。</small>:!annotation.confirmedText||!annotation.refs.length?<small className="study-warning">{annotation.confirmedText?'请先读取原文件，再核对定位。':'核对选区文字后，才可用于 AI 整理。'}</small>:null}
+        </SpotlightCard>
+      </article>;})}
+      <footer className="material-review-footer study-organize-footer"><small>按各条批注的预设生成草稿，核对后再收录活页。</small>{unavailable&&<p className="study-preset-unavailable" role="status">{unavailable}</p>}<div className="study-organize-actions"><span>已选 {selectedAnnotations.length} 条</span><Button size="sm" variant="primary" disabled={!!busy||!!unavailable||!selectedAnnotations.length} onClick={()=>startOrganize({mode:'annotations'})}>{busy?<LoaderCircle size={14} className="spin"/>:<Sparkles size={14}/>}生成整理草稿</Button></div></footer></>}
+    </>:<>
+      {materialTasks.length>1&&<label className="study-task-picker"><span className="sr-only">整理记录</span><select aria-label="选择整理草稿" value={taskId} onChange={event=>setTaskId(event.target.value)}>{materialTasks.map(item=><option key={item.id} value={item.id}>{item.routing==='auto'?'自动整理':studyPresets[item.preset??'notes'].label} · {new Date(item.createdAt).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</option>)}</select></label>}
+      {!task?<div className="study-empty"><p>生成整理草稿后，在这里核对并收录。</p></div>:taskProtected?<p className="study-warning" role="status">相关资料有未交卷考试，草稿内容暂时隐藏。交卷后可继续核对与收录。</p>:<>
+        <div className="study-task-progress" role="status"><strong>{task.routing==='auto'?'自动整理':studyPresets[task.preset??'notes'].label}</strong><span>{taskBusy?<><LoaderCircle size={13} className="spin"/>整理中 {task.done}/{task.total}</>:task.state==='partial'?'部分完成':task.state==='failed'?'未完成':`${sections.length} 项`}</span></div>
+        {sections.some(section=>section.review!=='adopted')&&<p className="study-draft-hint">{'核对内容并选择收录去向，审核后确认收录。'}</p>}
+        {task.stale&&<p className="study-warning">来源或批注已变化，旧草稿保留，暂不能收录。请重新选择范围整理。</p>}{task.error&&<p className="study-warning">{aiAssistantText(task.error)}</p>}{task.warnings.length>0&&<details className="study-warnings"><summary>注意事项（{task.warnings.length}）</summary>{task.warnings.map((warning,index)=><p key={index}>{aiAssistantText(warning)}</p>)}</details>}{task.error&&!task.stale&&task.materialIds.length===1&&<Button size="sm" disabled={!!busy||taskBusy||!access?.configured} onClick={()=>startOrganize({mode:task.mode,taskId:task.id})}>继续未完成批次</Button>}{!sections.length&&!taskBusy&&<p className="study-empty">暂无可核对的内容。</p>}
+        {sections.map((section,index)=>{const edit=edits[section.id],excluded=edit?.excluded??section.excluded,changed=edit&&(edit.title!==section.title||edit.body!==section.body||!!edit.destination&&edit.destination!==studyDestination(section)),supplement=section.generation?.contentOrigin==='ai-supplement',editing=editingSection===section.id&&section.review!=='adopted';return <article className={`study-candidate${excluded?' is-excluded':''}`} key={section.id}>
+          <SpotlightCard className="study-draft-card" spotlightColor="var(--theme-secondary)" intensity={.25} borderGlow={.15} proximity={0} flare={false}>
+            <header className="study-candidate-heading"><label>{section.review!=='adopted'&&<input type="checkbox" aria-label={`保留${section.destination==='practice'?'题目':'知识点'} ${index+1}`} checked={!excluded} disabled={!!busy||taskBusy} onChange={event=>changeEdit(section.id,{excluded:!event.target.checked})}/>}<b>{index+1}</b></label><strong className="study-draft-title">{editing?'编辑草稿':edit?.title??section.title}</strong>{section.review!=='adopted'&&<Button size="icon" variant="ghost" aria-label={`${editing?'结束编辑':'编辑'}草稿 ${index+1}`} title={editing?'结束编辑':'编辑草稿'} disabled={!!busy||taskBusy||task.stale} onClick={()=>setEditingSection(editing?'':section.id)}>{editing?<X size={14}/>:<Pencil size={14}/>}</Button>}</header>
+            {editing?<div className="study-draft-editor"><input aria-label={`${section.question?'题目':'知识点'} ${index+1} 标题`} value={edit?.title??section.title} disabled={!!busy||taskBusy||task.stale} onChange={event=>changeEdit(section.id,{title:event.target.value})}/>{section.question?<>{(['prompt','answer','explanation'] as const).map(field=><label key={field}>{field==='prompt'?'题目':field==='answer'?'参考答案':'解析'}<textarea aria-label={`题目 ${index+1} ${field==='prompt'?'题干':field==='answer'?'答案':'解析'}`} value={edit?.question?.[field]??section.question?.[field]??''} disabled={!!busy||taskBusy||task.stale} onChange={event=>changeQuestion(section.id,{[field]:event.target.value})}/></label>)}</>:<textarea aria-label={`知识点 ${index+1} 正文`} value={edit?.body??section.body} disabled={!!busy||taskBusy||task.stale} onChange={event=>changeEdit(section.id,{body:event.target.value})}/>}</div>:<AnnotationQuote quote={edit?.body??section.body} draft/>}
+            <div className="study-draft-meta"><label className="study-destination"><span className="sr-only">收录去向</span><select aria-label={`草稿 ${index+1} 收录去向`} title={!section.question?'纯知识笔记收录到活页；题目可选择练习板块。':'选择审核后的收录去向'} value={edit?.destination??studyDestination(section)} disabled={!!busy||taskBusy||task.stale||section.review==='adopted'} onChange={event=>changeEdit(section.id,{destination:event.target.value as StudyDestination})}>{(Object.entries(studyDestinationNames) as [StudyDestination,string][]).map(([destination,label])=><option key={destination} value={destination} disabled={destination!=='notebook'&&!section.question}>{label}</option>)}</select></label>{supplement&&<span className="study-content-origin is-supplement">AI 补充解释</span>}<small>{section.review==='adopted'?'已收录':changed||section.review==='pending'?'待审核':'已审核'}</small></div>
+            <button className="study-card-source" type="button" title={supplement?'提问出处，非答案依据':referenceLocation(section.refs.find(ref=>ref.materialId===material.id)!)} onClick={()=>{const ref=section.refs.find(ref=>ref.materialId===material.id)!;onReference({...ref,anchor:ref.anchor??{quote:ref.snippet}});if(width<720)setOpen(false);}}>查看出处<ChevronRight size={13}/></button>
+            {section.adopted?.map(location=><button className="study-adopted-location" aria-label={`打开活页 ${index+1}`} title={`${location.chapterTitle} / ${location.pageTitle}`} type="button" key={location.pageId} onClick={()=>onNotebook(location.pageId)}><Check size={13}/>打开活页<ChevronRight size={13}/></button>)}
+            {section.practice&&<button className="study-adopted-location" aria-label={`打开${studyDestinationNames[section.practice.section==='papers'?'papers':section.practice.section==='mistakes'?'mistakes':'practice']} ${index+1}`} type="button" onClick={()=>onPractice(section.practice!.materialId,section.practice!.section??'knowledge')}><Check size={13}/>打开{studyDestinationNames[section.practice.section==='papers'?'papers':section.practice.section==='mistakes'?'mistakes':'practice']}<ChevronRight size={13}/></button>}
+          </SpotlightCard>
+        </article>;})}
+        {sections.some(section=>section.review!=='adopted')&&<footer className="material-review-footer study-draft-actions"><Button size="sm" disabled={!!busy||taskBusy} onClick={()=>void perform('保存草稿',async()=>{await saveDraft();setEditingSection('');})}>保存草稿</Button><Button size="sm" disabled={!!busy||taskBusy||task.stale||!chosen.some(section=>section.review!=='adopted')} onClick={()=>void perform('审核草稿',async()=>{await approve();setEditingSection('');})}>审核通过</Button><Button size="sm" variant="primary" disabled={!!busy||taskBusy||task.stale||dirty.current||!chosen.some(section=>section.review==='approved')} onClick={()=>setAdopting(true)}>{adoptLabel}</Button></footer>}
+      </>}
+    </>}
+  </div>;
+  return <div ref={scope} className={`material-study-reader${open&&width>=720?' has-review':''}`} style={{'--review-width':`${paneWidth}px`} as CSSProperties}>
+    <div className="material-study-toolbar">
+      <Button size="sm" variant={mode==='pan'?'primary':'ghost'} aria-label="拖拽浏览" aria-pressed={mode==='pan'} disabled={!!busy} onClick={()=>{cancelAnnotation();setMode(mode==='pan'?'browse':'pan');setOpen(false);}}><Hand size={16}/>拖拽浏览</Button>
+      <DropdownMenu.Root modal={false}>
+        <DropdownMenu.Trigger asChild><Button size="sm" variant={mode==='region'||mode==='text'?'primary':'ghost'} aria-label="批注" aria-pressed={mode==='region'||mode==='text'} disabled={!!busy}><Highlighter size={16}/>批注<ChevronRight size={13}/></Button></DropdownMenu.Trigger>
+        <DropdownMenu.Portal><DropdownMenu.Content asChild side="right" align="start" sideOffset={6} collisionPadding={12}>
+          <div className="material-annotation-menu">
+            <DropdownMenu.RadioGroup className="material-annotation-options" value={mode} onValueChange={value=>{cancelAnnotation();setMode(value as 'region'|'text');setOpen(false);}}>
+              <DropdownMenu.RadioItem value="region" asChild><Button size="sm" variant={mode==='region'?'primary':'ghost'}><Scan size={16}/>框选批注</Button></DropdownMenu.RadioItem>
+              <DropdownMenu.RadioItem value="text" asChild><Button size="sm" variant={mode==='text'?'primary':'ghost'}><MessageSquarePlus size={15}/>文字批注</Button></DropdownMenu.RadioItem>
+            </DropdownMenu.RadioGroup>
+          </div>
+        </DropdownMenu.Content></DropdownMenu.Portal>
+      </DropdownMenu.Root>
+      <Button size="sm" variant="ghost" disabled={!!busy||!access?.configured||access.withheldMaterials.includes(material.id)||material.excluded||!!material.conflictResolution||material.status==='review'} onClick={()=>startOrganize({mode:'material'})}><Sparkles size={15}/>整理知识点</Button><Button size="sm" variant={open?'primary':'ghost'} aria-label="批注与草稿" aria-expanded={open} onClick={()=>setOpen(value=>!value)}>批注与草稿 <small>{materialAnnotations.length+materialTasks.length||''}</small></Button>
+    </div>
+    {mode!=='browse'&&<div className="material-selection-hint">{mode==='pan'?'按住鼠标左键拖动资料页面。按 Esc 退出。':mode==='text'?'拖选原文文字，再写下批注。按 Esc 退出。':'拖动框选整题、公式或图表，再写下批注。按 Esc 退出。'}<button type="button" onClick={cancelAnnotation}>{mode==='pan'?'退出拖拽':'退出批注'}</button></div>}
+    {referenceStale&&<div className="material-selection-hint">引用来自旧版资料，请重新核对原文件；旧批注和草稿已保留。</div>}
+    {report?.state==='running'||report?.state==='queued'?<div className="material-import-note" role="status"><LoaderCircle size={13} className="spin"/>正在本机读取资料并提取原题…</div>:report?.state==='failed'?<div className="material-import-note study-warning">{aiAssistantText(report.error)}<button type="button" onClick={()=>void perform('重试导入',async()=>{await request('/api/question-banks',{action:'auto-import',courseId,materialIds:[material.id],read:true});setNotice('已重新开始读取，完成后会更新导入数量。');})}>重试读取</button></div>:null}
+    {previewAnnotation&&previewMaterial.id!==material.id&&<div className="material-selection-hint">预览批注出处：{previewMaterial.name}</div>}
+    <div className="material-preview-scroll"><OriginalFilePreview material={previewMaterial} initialPage={previewAnnotation?.anchor.page??initialPage} studyAnnotations={{mode:previewAnnotation?'browse':mode,annotations:showAnnotations?materialAnnotations.map((item,index)=>({...item,number:index+1})).filter(item=>item.materialId===previewMaterial.id&&!item.stale):[],highlightedId:previewAnnotation?.id,pending:editor&&!editor.annotation&&editor.materialId===material.id?{...editor.selection,number:materialAnnotations.length+1}:undefined,onPick:selection=>void pick(selection),onAnnotationOpen:locate,focusAnchor:previewAnnotation?.anchor??anchor,onExit:cancelAnnotation,composer:editor&&!editor.annotation&&!open&&editor.materialId===material.id?{instruction:editor.instruction,busy,error,warning:!busy&&!editor.confirmed?'识别结果需要核对，可先保存批注。':undefined,onChange:value=>setEditor({...editor,instruction:value}),onCancel:cancelAnnotation,onSave:()=>void perform('保存批注',saveAnnotation),onDetails:()=>{setOpen(true);setTab('annotations');}}:undefined}}/></div>
+    {open&&width>=720&&<><div className="material-review-separator" role="separator" aria-label="调整资料预览和批注栏宽度" aria-orientation="vertical" aria-controls="material-review-pane" aria-valuemin={280} aria-valuemax={maxReviewWidth} aria-valuenow={paneWidth} tabIndex={0} title="左右拖动调整宽度，双击恢复" onDoubleClick={()=>resizeReview(360)} onKeyDown={event=>{if(!['ArrowLeft','ArrowRight','Home','End','Enter'].includes(event.key))return;event.preventDefault();resizeReview(event.key==='Home'?280:event.key==='End'?maxReviewWidth:event.key==='Enter'?360:paneWidth+(event.key==='ArrowLeft'?16:-16));}} onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();event.currentTarget.focus();draggingReview.current=true;event.currentTarget.setPointerCapture?.(event.pointerId);}} onPointerMove={event=>{if(!draggingReview.current||!scope.current)return;resizeReview(scope.current.getBoundingClientRect().right-event.clientX-6);}} onPointerUp={event=>{draggingReview.current=false;event.currentTarget.releasePointerCapture?.(event.pointerId);}} onPointerCancel={()=>{draggingReview.current=false;}} onLostPointerCapture={()=>{draggingReview.current=false;}}><span/></div><aside id="material-review-pane" className="material-review-pane" aria-label="批注与草稿"><header><strong>批注与草稿</strong><Button size="icon" variant="ghost" aria-label="关闭审核栏" onClick={()=>setOpen(false)}><X size={17}/></Button></header>{review}</aside></>}
+    <Dialog.Root open={open&&width<720} onOpenChange={setOpen}><Dialog.Portal><Dialog.Overlay className="material-review-overlay"/><Dialog.Content className="material-review-pane material-review-floating" onOpenAutoFocus={event=>{if(editor)event.preventDefault();}}><header><Dialog.Title>批注与草稿</Dialog.Title><Dialog.Close asChild><Button variant="ghost" size="icon" aria-label="关闭审核栏"><X size={17}/></Button></Dialog.Close></header><Dialog.Description className="sr-only">核对原文批注和 AI 整理草稿，审核后收入活页。</Dialog.Description>{review}</Dialog.Content></Dialog.Portal></Dialog.Root>
+    <Modal open={!!consent} onOpenChange={value=>{if(!value&&!busy)setConsent(null);}} title="生成整理草稿" description={consent?.routing==='auto'?'知识归入活页，题目归入知识点巩固。先核对草稿，再确认收录。':'核对草稿后，再收录活页。'} error={error}>{consent&&<><dl className="study-consent-summary"><div><dt>整理方式</dt><dd>{consent.routing==='auto'?<span>自动识别知识与题目</span>:(consent.groups??[consent]).map(group=><span key={group.preset}>{studyPresets[group.preset].label}{consent.groups&&<small> · {group.annotationIds.length} 条批注</small>}</span>)}</dd></div><div><dt>整理范围</dt><dd>{consent.mode==='annotations'?`已选 ${consent.annotationIds.length} 条批注`:'整份资料'}<ul className="study-consent-files">{consent.names.map((name,index)=><li key={`${name}-${index}`}>{name}</li>)}</ul></dd></div></dl>{consentBlocked&&<p className="study-warning">{!access?.configured?'AI 整理暂不可用，请稍后重试。':'相关资料有未交卷考试，交卷后再整理。'}</p>}</>}<div className="modal-footer"><Button disabled={!!busy} onClick={()=>setConsent(null)}>取消</Button><Button variant="primary" disabled={!!busy||consentBlocked} onClick={()=>void perform('生成整理草稿',async()=>{if(consent)await organize(consent);})}>{busy?'正在提交…':'同意并生成草稿'}</Button></div></Modal>
+    <Modal open={adopting} onOpenChange={setAdopting} title={task?.routing==='auto'?'确认收录':'选择整理内容的收录位置'} description={approvedQuestions.length?approvedLocations.length>1?'按所选去向分别收录，保留已有内容。':'将已审核的题目收录到'+studyDestinationNames[approvedLocations[0]?.destination??'practice']+'。':'追加所选内容，保留已有笔记与个人编辑。'} error={error}>{approvedQuestions.length>0&&<dl className="study-consent-summary">{approvedLocations.map(item=><div key={item.destination}><dt>{item.destination==='notebook'?'活页':'题目'}</dt><dd>{studyDestinationNames[item.destination]} · {item.count} {item.destination==='notebook'?'项':'题'}</dd></div>)}</dl>}{approvedKnowledge.length>0&&<><label className="study-target">收录位置<select aria-label="知识点收录位置" value={target} onChange={event=>setTarget(event.target.value)}><option value="new">新建章节与知识页</option>{notebook.data?.document.chapters.map(chapter=><option key={chapter.id} value={`chapter:${chapter.id}`}>{chapter.title} · 新建知识页</option>)}{notebook.data?.document.pages.map(page=><option key={page.id} value={`page:${page.id}`}>追加到：{page.title}</option>)}</select></label>{target==='new'&&<label className="study-target">章节名称<input value={chapterTitle} onChange={event=>setChapterTitle(event.target.value)} maxLength={80}/></label>}</>}<div className="modal-footer"><Button disabled={!!busy} onClick={()=>setAdopting(false)}>取消</Button><Button variant="primary" disabled={!!busy||!!approvedKnowledge.length&&!notebook.data||taskProtected} onClick={()=>void perform('收录内容',adopt)}>确认收录</Button></div></Modal>
+  </div>;
+}

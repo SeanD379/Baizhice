@@ -1,0 +1,149 @@
+/* New Chat: Prompt Input 3 public-preview layout and official React Bits Micro components. */
+.app-shell-5 .chat-workspace.chat-redesign {
+  --chat-input: var(--theme-subtle);
+  --chat-menu: var(--theme-hover);
+  --chat-ink: var(--theme-text);
+  --chat-muted: var(--theme-muted);
+  --chat-border: var(--theme-border-strong);
+  width: 100%;
+  max-width: none;
+  height: auto;
+  min-height: 100%;
+  position: relative;
+}
+.app-shell-5 .chat-redesign .chat-page-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.app-shell-5 .chat-redesign.chat-empty .chat-page-actions { position: absolute; top: 0; right: 0; }
+.app-shell-5 .chat-redesign .chat-page-actions .btn {
+  height: 32px;
+  min-height: 32px;
+  margin: 0;
+  padding: 0 10px;
+  gap: 6px;
+  border: 1px solid var(--theme-border-strong);
+  background: var(--theme-surface);
+  color: var(--chat-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.app-shell-5 .chat-redesign .chat-page-actions .btn:hover:not(:disabled) { background: var(--theme-hover); color: var(--chat-ink); }
+.app-shell-5 .chat-redesign:not(.chat-empty) .chat-heading { align-items: center; padding: 8px 0 32px max(0px, calc((100% - 1040px) / 2)); }
+.app-shell-5 .chat-redesign:not(.chat-empty) .chat-heading > div:first-child { flex: 1; min-width: 0; }
+.app-shell-5 .chat-redesign:not(.chat-empty) .chat-heading h1 { font-size: 28px; font-weight: 600; line-height: 1.35; letter-spacing: -.025em; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-shell-5 .chat-redesign.chat-empty {
+  justify-content: center;
+  padding-bottom: clamp(24px, 8vh, 72px);
+}
+.app-shell-5 .chat-redesign.chat-empty .chat-heading {
+  justify-content: center;
+  padding: 0 0 28px;
+  text-align: center;
+}
+.app-shell-5 .chat-redesign.chat-empty .chat-heading h1 {
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -.035em;
+  text-wrap: balance;
+}
+.app-shell-5 .chat-redesign.chat-empty .chat-heading p {
+  margin-top: 12px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--chat-muted);
+  text-wrap: pretty;
+}
+.app-shell-5 .chat-redesign .chat-thread { flex: 1; width: min(1040px, 100%); min-width: 0; margin: 0 auto; padding-bottom: 8px; }
+.app-shell-5 .chat-redesign .chat-quick-actions { justify-content: center; gap: 8px; margin-top: 20px; }
+.app-shell-5 .chat-redesign .chat-quick-actions button {
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--theme-border-strong);
+  background: var(--theme-surface);
+  color: var(--theme-secondary);
+  font-size: 12px;
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+.app-shell-5 .chat-redesign .chat-quick-actions button:hover { background: var(--theme-hover); color: var(--chat-ink); }
+.app-shell-5 .chat-redesign .chat-quick-actions button:active { transform: scale(.97); }
+.app-shell-5 .chat-redesign .chat-composer-redesign,
+.app-shell-5 .chat-redesign .chat-composer-redesign:focus-within {
+  position: sticky;
+  bottom: 0;
+  width: min(720px, 100%);
+  margin: 16px auto 0;
+  padding: 12px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--bg);
+  box-shadow: none;
+}
+.app-shell-5 .chat-redesign.chat-empty .chat-composer-redesign { position: static; margin: 0 auto; padding: 0; }
+.chat-redesign .prompt-bar__field { padding: 16px; gap: 12px; box-shadow: 0 0 0 1px var(--chat-border); transition: box-shadow 180ms ease; }
+.chat-redesign .prompt-bar__field:focus-within { box-shadow: 0 0 0 1px #656565; }
+.chat-redesign .is-dragging .prompt-bar__field { box-shadow: 0 0 0 2px #d4d4d4; background: var(--theme-hover); }
+.app-shell-5 .chat-redesign .prompt-bar__input {
+  min-height: 44px;
+  padding: 0;
+  color: var(--chat-ink);
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 24px;
+}
+.app-shell-5 .chat-redesign .prompt-bar__input::placeholder { color: var(--theme-muted); }
+.chat-redesign .prompt-bar__bar { gap: 8px; }
+.chat-redesign .prompt-bar__tool, .chat-redesign .prompt-bar__send { width: 36px; height: 36px; }
+.chat-redesign .prompt-bar__spacer { min-width: 0; color: var(--chat-muted); font-size: 11px; line-height: 1.5; }
+.chat-redesign .prompt-bar__chip { max-width: min(100%, 420px); }
+.chat-redesign .prompt-bar__chip-name { min-width: 0; }
+.chat-redesign .prompt-bar__send:disabled { cursor: not-allowed; }
+.chat-redesign .prompt-bar__tool:disabled, .chat-redesign .prompt-bar__chip-x:disabled { opacity: .45; cursor: not-allowed; }
+.app-shell-5 .chat-redesign .chat-privacy { margin: 0; padding: 12px 4px 4px; text-align: center; color: var(--theme-muted); font-size: 11px; line-height: 1.6; }
+.chat-redesign .chat-process { max-width: 100%; margin: 8px 0 20px; color: var(--theme-secondary); }
+.chat-redesign .chat-process .thought-line { width: 100%; max-width: 100%; }
+.chat-redesign .chat-process .thought-line__head { max-width: 100%; min-height: 40px; gap: 8px; }
+.chat-redesign .chat-process .thought-line__trace { width: 100%; min-width: 0; }
+.chat-redesign .chat-process .thought-line__steps { width: 100%; padding: 8px 0 4px 38px; gap: 8px; white-space: normal; line-height: 1.65; font-size: 13px; }
+.chat-redesign .chat-process .thought-line__step { align-items: flex-start; min-width: 0; }
+.chat-redesign .chat-process .thought-line__mark { margin-top: 4px; }
+.chat-redesign .chat-process .thought-line__step-text { overflow-wrap: anywhere; }
+.chat-redesign .chat-process .thought-line__step[data-done] .thought-line__step-text { opacity: .7; }
+.chat-redesign .chat-process .thought-line__step[data-error] { color: var(--theme-danger); }
+.chat-redesign .chat-process .thought-line__step[data-error] .thought-line__mark { opacity: 1; }
+.chat-redesign .chat-process .lattice-loader { min-width: 0; }
+.chat-redesign .chat-process .lattice-loader__timer { flex: none; font-variant-numeric: tabular-nums; }
+/* Apply Thought Line's original shimmer to the combined header's active label. */
+.chat-redesign .chat-process .thought-line[data-working] .lattice-loader__text[data-active] {
+  background: linear-gradient(100deg, color-mix(in srgb, var(--tl-color) 50%, transparent) 30%, var(--tl-color) 50%, color-mix(in srgb, var(--tl-color) 50%, transparent) 70%);
+  background-size: 250% 100%;
+  background-position: 125% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: thought-line-shimmer 1.8s linear infinite;
+}
+.chat-redesign :is(.prompt-bar__send,.prompt-bar__tool,.prompt-bar__chip-x,.thought-line__head):focus-visible { outline: 2px solid var(--theme-focus); outline-offset: 4px; }
+@media (max-width: 767px) {
+  .app-shell-5 .chat-redesign:not(.chat-empty) .chat-heading { padding-top: 0; padding-bottom: 24px; }
+  .app-shell-5 .chat-redesign:not(.chat-empty) .chat-heading h1 { font-size: 24px; }
+  .app-shell-5 .chat-redesign .chat-page-actions .btn { height: 44px; min-height: 44px; }
+  .app-shell-5 .chat-redesign .chat-page-actions .chat-history-entry { width: 44px; padding: 0; }
+  .chat-redesign .chat-history-label { display: none; }
+  .app-shell-5 .chat-redesign.chat-empty { padding-bottom: 24px; }
+  .app-shell-5 .chat-redesign.chat-empty .chat-heading h1 { font-size: 28px; }
+  .app-shell-5 .chat-redesign.chat-empty .chat-heading p { font-size: 13px; }
+  .chat-redesign .prompt-bar__field { padding: 12px; }
+  .app-shell-5 .chat-redesign .prompt-bar__input { font-size: 16px; }
+  .chat-redesign .prompt-bar__tool, .chat-redesign .prompt-bar__send { width: 44px; height: 44px; }
+  .chat-redesign .prompt-bar__chip-x { min-width: 28px; min-height: 28px; }
+  .app-shell-5 .chat-redesign .chat-quick-actions button { height: 40px; }
+  .app-shell-5 .chat-redesign .chat-privacy { font-size: 10px; }
+}
+@media (max-height: 580px) {
+  .app-shell-5 .chat-redesign.chat-empty { justify-content: flex-start; padding-top: 56px; padding-bottom: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-redesign .chat-process .thought-line[data-working] .lattice-loader__text[data-active] { background: none; color: inherit; -webkit-text-fill-color: currentColor; animation: none !important; }
+  .chat-redesign .lattice-loader__run .lattice-loader__cell { animation: none !important; opacity: .65; }
+  .chat-redesign .thought-line__pulse { animation: none !important; }
+}

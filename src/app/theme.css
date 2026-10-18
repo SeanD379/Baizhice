@@ -1,0 +1,91 @@
+/* Colors sampled from the App Shell 5 light preview; layout stays in the existing stylesheets. */
+/* Practice subpages keep a fixed light palette while the shell follows the chosen theme. */
+:root,
+.app-shell-5 main.view-practice:has(.practice-center-subpage),
+.app-shell-5 .practice-source-inspector,
+body:has(.practice-center-subpage) .modal:has(>.practice-settings,>.practice-answer-sheet,>.practice-loading-screen) {
+  color-scheme: light;
+  --theme-color-scheme: light;
+  --theme-canvas: #ffffff;
+  --theme-surface: #ffffff;
+  --theme-sidebar: #fafafa;
+  --theme-subtle: #fafafa;
+  --theme-hover: #f5f5f5;
+  --theme-pressed: #eeeeee;
+  --theme-text: #0a0a0a;
+  --theme-secondary: #525252;
+  --theme-muted: #737373;
+  --theme-faint: #a3a3a3;
+  --theme-border: #e5e5e5;
+  --theme-border-strong: #d4d4d4;
+  --theme-action: #171717;
+  --theme-action-hover: #404040;
+  --theme-action-text: #fafafa;
+  --theme-focus: #737373;
+  --theme-selection: #e5e5e5;
+  --theme-success: #187d64;
+  --theme-success-bg: #eef6f2;
+  --theme-warning: #966b20;
+  --theme-warning-bg: #fcf6e8;
+  --theme-danger: #b53e36;
+  --theme-danger-bg: #fff1ef;
+  --theme-info: #315c9e;
+  --theme-info-bg: #edf2ff;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --theme-color-scheme: dark;
+  --theme-canvas: #0a0a0a;
+  --theme-surface: #171717;
+  --theme-sidebar: #171717;
+  --theme-subtle: #202020;
+  --theme-hover: #262626;
+  --theme-pressed: #303030;
+  --theme-text: #f5f5f5;
+  --theme-secondary: #d4d4d4;
+  --theme-muted: #a3a3a3;
+  --theme-faint: #737373;
+  --theme-border: #262626;
+  --theme-border-strong: #404040;
+  --theme-action: #fafafa;
+  --theme-action-hover: #d4d4d4;
+  --theme-action-text: #171717;
+  --theme-focus: #d4d4d4;
+  --theme-selection: #404040;
+  --theme-success: #86cbb0;
+  --theme-success-bg: #152821;
+  --theme-warning: #e4bd70;
+  --theme-warning-bg: #2b2316;
+  --theme-danger: #f28b82;
+  --theme-danger-bg: #321c1c;
+  --theme-info: #9fbce8;
+  --theme-info-bg: #1c2534;
+}
+.app-shell-5 main.view-practice:has(.practice-center-subpage) { color: var(--theme-text); }
+.app-shell-5 .sidebar { background: var(--theme-sidebar); }
+.app-shell-5 .theme-toggle {
+  align-self: stretch; justify-content: flex-start; gap: 10px;
+  width: 100%; height: 36px; min-height: 36px; padding: 0 12px;
+  border-radius: 8px; background: transparent; color: var(--theme-muted);
+}
+.app-shell-5 .theme-toggle:hover:not(:disabled) { background: var(--theme-hover); color: var(--theme-text); }
+:root[data-theme-transition]::view-transition { pointer-events: none; }
+:root[data-theme-transition]::view-transition-group(root),
+:root[data-theme-transition]::view-transition-old(root),
+:root[data-theme-transition]::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+:root[data-theme-transition='dark']::view-transition-new(root),
+:root[data-theme-transition='light']::view-transition-old(root) { z-index: 1; }
+.app-shell-5.sidebar-collapsed .theme-toggle { align-self: center; justify-content: center; width: 36px; padding: 0; }
+.app-shell-5.sidebar-collapsed .theme-toggle > span { display: none; }
+@media (max-width: 1023px) {
+  .app-shell-5 .sidebar-open .theme-toggle { align-self: stretch; justify-content: flex-start; width: 100%; padding: 0 12px; }
+  .app-shell-5 .sidebar-open .theme-toggle > span { display: inline; }
+}
+@media print {
+  :root[data-theme] {
+    color-scheme: light; --theme-color-scheme: light;
+    --theme-canvas: #fff; --theme-surface: #fff; --theme-subtle: #fafafa;
+    --theme-text: #0a0a0a; --theme-secondary: #525252; --theme-muted: #737373;
+    --theme-border: #e5e5e5; --theme-action: #171717; --theme-action-text: #fafafa;
+  }
+}

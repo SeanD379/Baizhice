@@ -1,0 +1,15 @@
+services:
+  lms:
+    build:
+      context: ..
+    restart: unless-stopped
+    env_file: .env.cloud
+    environment:
+      PRIVATE_CLOUD: '1'
+      DATA_DIR: /app/data
+      DATABASE_URL: file:/app/data/workbench.db
+    ports:
+      - '127.0.0.1:4173:4173'
+    volumes:
+      - ./data:/app/data
+    stop_grace_period: 30s

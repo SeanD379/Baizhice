@@ -1,0 +1,9 @@
+:root { --brand-blue: #2f66da; --brand-text: #173b75; }
+:root[data-theme='dark'] { --brand-text: #ffffff; }
+.brand-logo { display: block; object-fit: contain; flex-shrink: 0; }
+.app-shell-5 .brand-mark { background: transparent; border-radius: 0; }
+.app-shell-5 .brand-mark .brand-logo { width: 42px; height: 42px; max-width: none; }
+.app-shell-5 .brand>div { min-width: 0; }
+.app-shell-5 .brand b, .private-login h1 { color: var(--brand-text); }
+.app-shell-5 .brand div>span { white-space: nowrap; letter-spacing: 0; }
+:root[data-theme='dark'] .brand-logo { filter: brightness(0) invert(1); }

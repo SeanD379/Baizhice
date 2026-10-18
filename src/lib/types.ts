@@ -1,0 +1,10 @@
+export type Reference = { materialId: string; name: string; page: number; snippet: string; location?: 'page' | 'paragraph' | 'slide' | 'image'; anchor?: { quote: string; prefix?: string; suffix?: string; displayPage?: number; rects?: { x: number; y: number; width: number; height: number }[] }; sourceHash?: string };
+export type Section = { id: string; title: string; body: string; refs: Reference[]; edited?: boolean; needsReview?: boolean; generation?: { provider: 'OpenAI' | 'DeepSeek'; model: string; draftId: string; contentOrigin?: 'source' | 'ai-supplement' } };
+export type Material = { id: string; courseId: string; name: string; mime: string; size: number; fixture: string | null; chapter: string; folderId?: string | null; status: string; excluded: boolean; conflictResolution?: string | null; conflictFeedbackReason?: string | null; conflictFeedbackNote?: string | null; conflictResolvedAt?: string | null; origin: string; createdAt: string };
+export type Folder = { id: string; courseId: string; parentId: string | null; name: string; createdAt: string };
+export type Version = { id: string; courseId: string; number: number; title: string; sections: Section[]; sourceIds: string[]; summary: string; createdAt: string };
+export type Course = { id: string; name: string };
+export type Workspace = { courses: Course[]; materials: Material[]; folders?: Folder[]; versions: Version[]; privateCloud?: boolean };
+export type ChatAttachment = { materialId?: string; name: string };
+export type ChatMessage = { id: string; role: 'user' | 'assistant'; content: string; status: 'complete' | 'error'; attachments: ChatAttachment[]; createdAt: string };
+export type ConversationSummary = { id: string; title: string; updatedAt: string; messageCount: number };

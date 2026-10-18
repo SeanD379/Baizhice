@@ -1,0 +1,18 @@
+node_modules/
+.next/
+.next-*/
+.env*
+!.env.example
+data/
+prisma/*.db*
+*.tsbuildinfo
+test-results/
+tmp/
+
+# Local agent state and generated artifacts
+.claude-flow/
+.superpowers/
+.vitest/
+__pycache__/
+work/
+*.log

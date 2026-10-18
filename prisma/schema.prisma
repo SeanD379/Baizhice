@@ -1,0 +1,335 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+model Course {
+  id        String @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  materials Material[]
+  folders   Folder[]
+  inboxItems InboxItem[]
+  versions  Version[]
+  practiceSets PracticeSet[]
+  practiceSessions PracticeSession[]
+  practiceRounds PracticeRound[]
+  conversations Conversation[]
+  questionBanks OriginalQuestionBank[]
+  originalSessions OriginalPracticeSession[]
+  originalRounds OriginalPracticeRound[]
+  notebook Notebook?
+  questionStates PracticeQuestionState[]
+  dailyTasks DailyPracticeTask[]
+  materialAnnotations MaterialAnnotation[]
+  materialStudyTasks MaterialStudyTask[]
+}
+
+model PracticeQuestionState {
+  id String @id @default(cuid())
+  courseId String
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  refKey String
+  ref String
+  favorite Boolean @default(false)
+  manualWrong Boolean @default(false)
+  tags String @default("[]")
+  note String @default("")
+  consolidatedAt DateTime?
+  revision Int @default(1)
+  updatedAt DateTime @updatedAt
+  @@unique([courseId, refKey])
+  @@index([courseId, updatedAt])
+}
+
+model DailyPracticeTask {
+  id String @id @default(cuid())
+  courseId String
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  section String
+  day String
+  content String
+  createdAt DateTime @default(now())
+  @@unique([courseId, section, day])
+}
+
+model Notebook {
+  courseId String @id
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  content String
+  revision Int @default(1)
+  updatedAt DateTime @updatedAt
+  snapshots NotebookSnapshot[]
+  mutations NotebookMutation[]
+}
+
+model NotebookSnapshot {
+  id String @id @default(cuid())
+  courseId String
+  notebook Notebook @relation(fields: [courseId], references: [courseId], onDelete: Cascade)
+  content String
+  summary String
+  createdAt DateTime @default(now())
+  @@index([courseId, createdAt])
+}
+
+model NotebookMutation {
+  courseId String
+  requestId String
+  notebook Notebook @relation(fields: [courseId], references: [courseId], onDelete: Cascade)
+  fingerprint String
+  revision Int
+  createdAt DateTime @default(now())
+  @@id([courseId, requestId])
+}
+
+model User {
+  id String @id
+  name String
+  email String @unique
+  emailVerified Boolean @default(false)
+  image String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sessions Session[]
+  accounts Account[]
+}
+
+model Session {
+  id String @id
+  expiresAt DateTime
+  token String @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+model Account {
+  id String @id
+  accountId String
+  providerId String
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken String?
+  refreshToken String?
+  idToken String?
+  accessTokenExpiresAt DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope String?
+  password String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([userId])
+}
+
+model Verification {
+  id String @id
+  identifier String
+  value String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([identifier])
+}
+model Material {
+  id        String @id @default(cuid())
+  courseId  String
+  course    Course @relation(fields: [courseId], references: [id])
+  name      String
+  mime      String
+  size      Int
+  hash      String
+  filePath  String
+  fixture   String?
+  chapter   String @default("未分类")
+  folderId  String?
+  folder    Folder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  status    String @default("stored")
+  excluded  Boolean @default(false)
+  conflictResolution String?
+  conflictFeedbackReason String?
+  conflictFeedbackNote String?
+  conflictResolvedAt DateTime?
+  origin    String
+  createdAt DateTime @default(now())
+  examRecord ExamRecord?
+  questionBanks OriginalQuestionBank[]
+  annotations MaterialAnnotation[]
+  @@unique([courseId, hash])
+  @@index([folderId])
+}
+model MaterialAnnotation {
+  id String @id @default(uuid())
+  courseId String
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  materialId String
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  sourceHash String
+  content String
+  revision Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([courseId, createdAt])
+}
+model MaterialStudyTask {
+  id String @id @default(uuid())
+  courseId String
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  fingerprint String
+  content String
+  revision Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([courseId, fingerprint])
+  @@index([courseId, updatedAt])
+}
+model Folder {
+  id        String @id @default(cuid())
+  courseId  String
+  course    Course @relation(fields: [courseId], references: [id])
+  name      String
+  parentId  String?
+  parent    Folder? @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Folder[] @relation("FolderTree")
+  createdAt DateTime @default(now())
+  materials Material[]
+  @@unique([courseId, parentId, name])
+  @@index([parentId])
+}
+model InboxItem {
+  id        String @id @default(cuid())
+  name      String
+  mime      String
+  size      Int
+  hash      String
+  extension String
+  filePath  String
+  source    String @default("本机上传")
+  courseId  String?
+  course    Course? @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+}
+model ExamRecord {
+  materialId String @id
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  content String
+  revision Int @default(1)
+  updatedAt DateTime @updatedAt
+}
+model OriginalQuestionBank {
+  id String @id @default(cuid())
+  courseId String
+  course Course @relation(fields: [courseId], references: [id])
+  materialId String
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  sourceHash String
+  content String
+  revision Int @default(1)
+  updatedAt DateTime @updatedAt
+  @@unique([materialId, sourceHash])
+  @@index([courseId, updatedAt])
+}
+model OriginalPracticeSession {
+  id String @id
+  courseId String
+  course Course @relation(fields: [courseId], references: [id])
+  context String
+  content String
+  revision Int @default(1)
+  updatedAt DateTime @updatedAt
+  rounds OriginalPracticeRound[]
+}
+model OriginalPracticeRound {
+  id String @id @default(cuid())
+  sessionId String
+  session OriginalPracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  courseId String
+  course Course @relation(fields: [courseId], references: [id])
+  content String
+  createdAt DateTime @default(now())
+  @@index([courseId, createdAt])
+}
+model Version {
+  id        String @id @default(cuid())
+  courseId  String
+  course    Course @relation(fields: [courseId], references: [id])
+  number    Int
+  title     String
+  content   String
+  sourceIds String
+  summary   String
+  createdAt DateTime @default(now())
+  practiceSets PracticeSet[]
+  practiceSessions PracticeSession[]
+  practiceRounds PracticeRound[]
+  @@unique([courseId, number])
+}
+model PracticeSet {
+  id         String @id @default(cuid())
+  courseId   String
+  course     Course @relation(fields: [courseId], references: [id])
+  versionId  String
+  version    Version @relation(fields: [versionId], references: [id])
+  questions  String
+  sectionIds String
+  sourceHash String
+  model      String
+  reviewed   Boolean @default(false)
+  createdAt  DateTime @default(now())
+  @@index([courseId, versionId])
+}
+model PracticeSession {
+  id        String @id
+  courseId  String
+  course    Course @relation(fields: [courseId], references: [id])
+  versionId String
+  version   Version @relation(fields: [versionId], references: [id])
+  content   String
+  revision  Int @default(1)
+  updatedAt DateTime @updatedAt
+}
+
+model PracticeRound {
+  id        String @id @default(cuid())
+  scope     String
+  revision  Int
+  courseId  String
+  course    Course @relation(fields: [courseId], references: [id])
+  versionId String
+  version   Version @relation(fields: [versionId], references: [id])
+  questions String
+  content   String
+  createdAt DateTime @default(now())
+  @@unique([scope, revision])
+  @@index([courseId, createdAt])
+}
+
+model Conversation {
+  id        String @id @default(cuid())
+  courseId  String
+  course    Course @relation(fields: [courseId], references: [id])
+  title     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  messages  ChatMessage[]
+  @@index([courseId, updatedAt])
+}
+
+model ChatMessage {
+  id             String @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String
+  content        String
+  status         String @default("complete")
+  attachments    String @default("[]")
+  createdAt      DateTime @default(now())
+  @@index([conversationId, createdAt])
+}
