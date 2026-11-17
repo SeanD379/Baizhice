@@ -149,6 +149,44 @@ it('displays existing model errors using the AI assistant name while retaining c
   expect(container.textContent).not.toMatch(/deepseek/i);expect(container.textContent).toContain('AI 助手');
   expect(container.textContent).toContain('已完成的草稿已保留');expect(document.querySelectorAll('.study-candidate')).toHaveLength(1);
 });
+it('explains actual question coverage and locates AI answers by question identity',async()=>{
+  const questions=parseOriginalQuestions({id:'m',name:material.name},[{page:1,text:'单选题'},{page:2,text:'1.居民将现金存入活期存款'},{page:3,text:'A.收益性 B.流动性 C.风险性 D.偿还性'},{page:4,text:'2.通常情况下，当市场利率低于息票率时，发债企业多采用（）。'},{page:5,text:'A.折价发行 B.溢价发行 C.等价发行 D.止损价发行'},{page:6,text:'3.下列属于长期信用工具的是（）。'},{page:7,text:'A.普通股 B.支票 C.汇票 D.银行承兑汇票'}]);
+  expect(questions).toHaveLength(3);questions[0]={...questions[0],answer:'B',answerSource:'ai',explanation:'活期存款的流动性较强。'};
+  tasks=[study({state:'partial',routing:'auto',sourceQuestions:questions,sections:questions.slice(0,2).map(question=>({id:question.id,title:`单选题 ${question.number}`,body:'【答案】B',question,refs:question.sources.map(source=>({...source,materialId:'m'})),review:'pending'})),warnings:['题1（p2 题干、p3 选项）answerSource 为 ai。','所选页面没有原文讲解，因此 sections 为空。','page 21 没有题干，请核对。']})];
+  await render();await openDrafts();
+  expect(document.querySelector('.study-result-summary')?.textContent).toBe('已识别 3 道题，已生成 2 道题草稿，另有 1 道尚未进入本次草稿。');
+  expect(document.querySelector('.study-draft-hint')?.textContent).toBe('请对照原文件核对下方草稿，再审核并确认收录。');
+  const details=document.querySelector<HTMLDetailsElement>('.study-warnings')!;
+  expect(details).not.toBeNull();expect(details.open).toBe(false);
+  expect(details.querySelector('summary')?.textContent).toBe('整理说明（2 项）');
+  expect(details.textContent).toContain('部分答案与解析由 AI 补充');expect(details.textContent).not.toMatch(/questionIds|sections|answerSource|原文位置|单选题第|未生成知识点|有内容需要核对/);
+  expect(document.querySelector('.study-draft-body')?.textContent).toContain('【AI 补充答案】B');
+  expect(document.querySelectorAll('.study-draft-body')[1]?.textContent).toContain('原文未提供答案');
+  expect(details.querySelector('button')).toBeNull();
+  expect(document.querySelectorAll('.study-candidate')).toHaveLength(2);expect(generationCalls()).toEqual([]);
+});
+it.each([
+  ['ready',1,'已生成 1 项草稿。'],
+  ['partial',1,'已生成 1 项草稿。'],
+  ['ready',0,'本次未生成可用草稿。'],
+  ['partial',0,'本次未生成可用草稿。'],
+  ['failed',0,'整理未完成，本次未生成可用草稿。'],
+  ['queued',0,'正在等待整理，完成后可在这里查看草稿。'],
+  ['running',1,'正在整理，已生成 1 项草稿。'],
+] as const)('explains the actual %s result with %i visible drafts',async(state,count,expected)=>{
+  tasks=[study({state,sections:count?study().sections:[]})];await render();await openDrafts();
+  expect(document.querySelector('.study-result-summary')?.textContent).toBe(expected);
+  expect(document.querySelector('.study-warnings')).toBeNull();
+});
+it('counts only the current file and resets expanded checks when switching drafts',async()=>{
+  const warnings=['练习题.docx：提取不完整，请检查未识别位置。'];
+  tasks=[study({materialIds:['m','second'],warnings,sections:[...study().sections,{...study().sections[0],id:'foreign',refs:[{...reference,materialId:'second'}]}]}),study({id:'older',warnings})];
+  await render();await openDrafts();
+  expect(document.querySelector('.study-result-summary')?.textContent).toBe('已生成 1 项草稿，部分内容需要检查。');
+  document.querySelector<HTMLDetailsElement>('.study-warnings')!.open=true;
+  await changeSelect('选择整理草稿','older');
+  expect(document.querySelector<HTMLDetailsElement>('.study-warnings')!.open).toBe(false);
+});
 it('restores the review width and supports keyboard resizing within readable pane limits', async () => {
   localStorage.setItem('lms.study.review-width:c', '430'); await render(); await openAnnotations();
   const separator = byLabel<HTMLDivElement>('调整资料预览和批注栏宽度');
@@ -266,7 +304,7 @@ it('requires explicit region-text verification before an annotation can be organ
 });
 const imageSelection=(quote='区域名词')=>({kind:'region' as const,quote,prefix:'',suffix:'',rects:[{x:.1,y:.1,width:.2,height:.2}],displayPage:1,image:'data:image/png;base64,crop'});
 it('switches between grab, box and text tools without requesting AI',async()=>{
-  await render();await click('拖拽浏览');expect(previewAnnotations.mode).toBe('pan');
+  await render();await click('浏览');expect(previewAnnotations.mode).toBe('pan');
   const openTools=()=>act(async()=>button('批注').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));
   await openTools();await click('框选批注');expect(previewAnnotations.mode).toBe('region');
   await openTools();await click('文字批注');expect(previewAnnotations.mode).toBe('text');expect(generationCalls()).toEqual([]);
@@ -300,7 +338,7 @@ it('keeps confirmation concise with the actual selected files and count, and can
 it('hides saved marks during browsing and panning, and shows them in annotation and draft review',async()=>{
   tasks=[study()];await render();expect(previewAnnotations.annotations).toEqual([]);
   await openAnnotations();expect(previewAnnotations.annotations?.map(item=>item.id)).toEqual(['a','b']);
-  await act(async()=>byLabel<HTMLButtonElement>('拖拽浏览').click());expect(previewAnnotations.mode).toBe('pan');expect(previewAnnotations.annotations).toEqual([]);
+  await act(async()=>byLabel<HTMLButtonElement>('浏览').click());expect(previewAnnotations.mode).toBe('pan');expect(previewAnnotations.annotations).toEqual([]);
   await openAnnotations();expect(previewAnnotations.annotations).toEqual([]);
   await act(async()=>document.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="false"]')!.click());
   expect(previewAnnotations.annotations?.map(item=>item.id)).toEqual(['a','b']);
@@ -308,7 +346,7 @@ it('hides saved marks during browsing and panning, and shows them in annotation 
 });
 
 it('previews hovered and selected cards during panning, then restores clean browsing',async()=>{
-  await render();await click('拖拽浏览');await openAnnotations();expect(previewAnnotations.annotations).toEqual([]);
+  await render();await click('浏览');await openAnnotations();expect(previewAnnotations.annotations).toEqual([]);
   await act(async()=>document.querySelector('.study-annotation')!.dispatchEvent(new MouseEvent('mouseover',{bubbles:true})));
   expect(previewAnnotations.highlightedId).toBe('a');expect(previewAnnotations.mode).toBe('browse');expect(previewAnnotations.focusAnchor?.quote).toBe('汇率');
   await act(async()=>document.querySelector('.study-annotation')!.dispatchEvent(new MouseEvent('mouseout',{bubbles:true})));
@@ -322,8 +360,24 @@ it('automatically routes whole-file content independently of selected annotation
   annotations.forEach(item=>item.instruction=studyPresets.concepts.description);await render();await click('整理知识点');
   const dialog=document.querySelector('[role="dialog"]')!;
   expect(dialog.textContent).toContain('自动识别知识与题目');expect(dialog.textContent).toContain('整份资料');expect(dialog.textContent).not.toContain('补充概念解释');expect(generationCalls()).toEqual([]);
-  await click('同意并生成草稿');
-  expect(generationCalls()).toEqual([{action:'study-organize',courseId:'c',mode:'material',preset:'notes',routing:'auto',materialIds:['m'],annotationIds:[],confirmed:true}]);
+  await click('开始整理');
+  expect(generationCalls()).toEqual([{action:'study-organize',courseId:'c',mode:'material',preset:'notes',routing:'auto',materialIds:['m'],annotationIds:[],supplementAnswers:false,confirmed:true}]);
+});
+
+it('asks before supplementing answers and sends the opt-in only on confirmation',async()=>{
+  await render();await click('整理知识点');
+  const toggle=document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="AI 补充答案与解析"]')!;
+  expect(toggle).not.toBeNull();expect(toggle.getAttribute('aria-checked')).toBe('false');
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('缺少答案');
+  await act(async()=>toggle.click());expect(toggle.getAttribute('aria-checked')).toBe('true');expect(generationCalls()).toEqual([]);
+  await click('开始整理');expect(generationCalls()[0]).toMatchObject({routing:'auto',supplementAnswers:true,confirmed:true});
+});
+
+it('discards a canceled answer-supplement choice without calling AI',async()=>{
+  await render();await click('整理知识点');
+  await act(async()=>document.querySelector<HTMLButtonElement>('[role="switch"]')!.click());
+  await click('取消');await click('整理知识点');
+  expect(document.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('false');expect(generationCalls()).toEqual([]);
 });
 
 it('reviews and adopts question drafts into knowledge practice without flushing or writing a notebook',async()=>{

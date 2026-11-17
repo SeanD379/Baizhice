@@ -3,7 +3,8 @@
 // Adapted from https://www.reactbits.dev/micro/thought-line. See LICENSE.md.
 
 import React, { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { animate, useReducedMotion, type AnimationPlaybackControls } from 'motion/react';
+import { animate, type AnimationPlaybackControls } from 'motion/react';
+import { useAppReducedMotion as useReducedMotion } from '../user-preferences';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { ArrowDown01Icon, Cancel01Icon, SparklesIcon, Tick02Icon } from '@hugeicons/core-free-icons';
 import './ThoughtLine.css';

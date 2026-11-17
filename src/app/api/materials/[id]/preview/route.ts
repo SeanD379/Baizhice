@@ -1,3 +1,4 @@
+import { withWorkspace } from '@/lib/workspace-scope';
 import { requirePrivateAccess } from '@/lib/private-access';
 import { checkOrigin, errorResponse } from '@/lib/server';
 import { db } from '@/lib/db';
@@ -5,7 +6,7 @@ import { OfficePreviewError, readOfficePreview } from '@/lib/office-preview';
 import { NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
-export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleGET(request: Request, context: { params: Promise<{ id: string }> }) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -23,3 +24,5 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     return errorResponse(error);
   }
 }
+
+export const GET = withWorkspace(handleGET);

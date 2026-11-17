@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 
 const mock = vi.hoisted(() => ({ material: vi.fn(), preview: vi.fn(), access: vi.fn() }));
-vi.mock('@/lib/db', () => ({ db: { material: { findUnique: mock.material } }, dataDir: 'private-test-data' }));
+vi.mock('@/lib/db', () => ({ db: { material: { findUnique: mock.material } }, getDataDir:()=>'private-test-data',dataDir:'private-test-data' }));
 vi.mock('@/lib/private-access', () => ({ requirePrivateAccess: mock.access }));
 vi.mock('@/lib/office-preview', async importOriginal => ({ ...await importOriginal<typeof import('@/lib/office-preview')>(), readOfficePreview: mock.preview }));
 import { GET } from './route';

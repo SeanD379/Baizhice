@@ -1,8 +1,10 @@
+import { withoutBasePath } from '@/lib/base-path';
 import type { NotebookDocument, RichNode } from '@/lib/notebook';
+import { workspaceFetch, scopedDatabaseName } from '@/lib/workspace-storage';
 
 export function openNotebookDrafts(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('lms-notebook-drafts', 2);
+    const request = indexedDB.open(scopedDatabaseName('lms-notebook-drafts'), 2);
     request.onupgradeneeded = () => {
       for (const name of ['drafts', 'assets']) if (!request.result.objectStoreNames.contains(name)) request.result.createObjectStore(name);
     };
@@ -35,9 +37,9 @@ export async function uploadLocalImages(document: NotebookDocument): Promise<Not
         let url = saved.uploaded;
         if (!url) {
           const body = new FormData(); body.set('file', saved.blob, saved.name);
-          const response = await fetch('/api/notebook-assets', { method: 'POST', body }), data = await response.json();
+          const response = await workspaceFetch('/api/notebook-assets', { method: 'POST', body }), data = await response.json();
           if (!response.ok) throw new Error(data.error ?? '图片等待同步');
-          url = data.url; await asset(id, { ...saved, uploaded: url });
+          url = withoutBasePath(data.url); await asset(id, { ...saved, uploaded: url });
         }
         replacements.set(src, url!);
       }

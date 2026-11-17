@@ -35,6 +35,22 @@ it('keeps section headings with their following text when a notebook page contin
   const sheets = buildLeafSheets({ ...emptyNotebook(), pages: [page] }, 340, { 'p:0': 430, 'p:1': 40, 'p:2': 80 }, 520);
   expect(sheets).toHaveLength(2); expect(sheets[1].pieces.map(piece => piece.node.type)).toEqual(['heading', 'paragraph']);
 });
+it('fits each knowledge point to its available paper space without losing or repeating text', () => {
+  const pages = ['short', 'long-title'].map(id => ({ id, title: id, chapterId: null, doc: markdownDocument('第一段。\n\n第二段。\n\n第三段。') }));
+  const heights = Object.fromEntries(pages.flatMap(page => readingPieces(page).map(piece => [`${page.id}:${piece.index}`, 100])));
+  const sheets = buildLeafSheets({ ...emptyNotebook(), pages }, 340, heights, page => page.id === 'short' ? 320 : 220);
+  expect(sheets.filter(sheet => sheet.page.id === 'short')).toHaveLength(1);
+  expect(sheets.filter(sheet => sheet.page.id === 'long-title')).toHaveLength(2);
+  for (const page of pages) expect(sheets.filter(sheet => sheet.page.id === page.id).flatMap(sheet => sheet.pieces)).toEqual(readingPieces(page));
+});
+it('breaks a run of headings before their combined content exceeds a small sheet', () => {
+  const page = { id: 'p', title: '笔记', chapterId: null, doc: markdownDocument('# 标题\n\n## 重点\n\n### 比较\n\n后面的内容。') };
+  const heights = { 'p:0': 50, 'p:1': 50, 'p:2': 50, 'p:3': 150 };
+  const sheets = buildLeafSheets({ ...emptyNotebook(), pages: [page] }, 260, heights, 250);
+  expect(sheets).toHaveLength(2);
+  expect(sheets[1].pieces.map(piece => piece.node.type)).toEqual(['heading', 'paragraph']);
+  expect(sheets.flatMap(sheet => sheet.pieces)).toEqual(readingPieces(page));
+});
 it('accepts legacy notebooks and preserves each supported paper choice', () => {
   expect(validateNotebook(emptyNotebook()).paperType).toBeUndefined();
   for (const paperType of ['blank', 'ruled', 'grid'] as const) expect(validateNotebook({ ...emptyNotebook(), paperType }).paperType).toBe(paperType);

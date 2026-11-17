@@ -1,7 +1,8 @@
+import { withWorkspace } from '@/lib/workspace-scope';
 import { requirePrivateAccess } from '@/lib/private-access';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { db } from '@/lib/db';
+import { db, getDataDir } from '@/lib/db';
 import { checkOrigin, errorResponse } from '@/lib/server';
 import { practiceContext } from '@/lib/practice-store';
 import { sessionSchema, validateSession } from '@/lib/practice-session';
@@ -18,18 +19,18 @@ const schema=z.discriminatedUnion('action',[
   z.object({...base,action:z.literal('save'),scope:z.string().regex(/^[a-f0-9]{64}$/),revision:z.number().int().nonnegative(),session:sessionSchema,dailyTaskId:z.string().min(1).max(100).optional()}),
 ]);
 const pending=new Set<string>();
-export async function GET(request:Request) {
+async function handleGET(request:Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {checkOrigin(request);const params=new URL(request.url).searchParams;if(params.get('source')==='original')return await originalPracticeGet(params.get('courseId')??'');const input=z.object({...base,dailyTaskId:z.string().min(1).max(100).optional()}).parse(Object.fromEntries(params));return NextResponse.json((await practiceContext(input.courseId,input.versionId,db,input.dailyTaskId)).data);}
   catch(error){return errorResponse(error);}
 }
-export async function POST(request:Request) {
+async function handlePOST(request:Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   let pendingCourse:string|undefined;
   try {
     checkOrigin(request);const body=await request.json();if(typeof body?.action==='string'&&body.action.startsWith('original-'))return await originalPracticeAction(body);const input=schema.parse(body);
     if(input.action==='generate') {
-      if(pending.has(input.courseId)||pending.size>=2)throw new Error('已有出题任务，请稍后重试。');pendingCourse=input.courseId;pending.add(pendingCourse);
+      if(pending.has(JSON.stringify([getDataDir(),input.courseId]))||pending.size>=2)throw new Error('已有出题任务，请稍后重试。');pendingCourse=JSON.stringify([getDataDir(),input.courseId]);pending.add(pendingCourse);
       const context=await practiceContext(input.courseId,input.versionId);
       const sections=context.eligible.filter(s=>s.generation&&input.sectionIds.includes(s.id));
       if(sections.length!==input.sectionIds.length)throw new Error('所选知识点尚未核对或来源不可用。');
@@ -72,3 +73,6 @@ export async function POST(request:Request) {
   } catch(error){return errorResponse(error);}
   finally{if(pendingCourse)pending.delete(pendingCourse);}
 }
+
+export const GET = withWorkspace(handleGET);
+export const POST = withWorkspace(handlePOST);

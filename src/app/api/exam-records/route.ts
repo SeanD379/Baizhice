@@ -1,3 +1,4 @@
+import { withWorkspace } from '@/lib/workspace-scope';
 import { requirePrivateAccess } from '@/lib/private-access';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -16,7 +17,7 @@ async function examMaterial(courseId: string, materialId: string) {
   return material;
 }
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -27,7 +28,7 @@ export async function GET(request: Request) {
   } catch (error) { return errorResponse(error); }
 }
 
-export async function PUT(request: Request) {
+async function handlePUT(request: Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -45,3 +46,6 @@ export async function PUT(request: Request) {
     return NextResponse.json({ revision: input.revision + 1 });
   } catch (error) { return errorResponse(error); }
 }
+
+export const GET = withWorkspace(handleGET);
+export const PUT = withWorkspace(handlePUT);

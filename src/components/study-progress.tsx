@@ -1,4 +1,5 @@
 'use client';
+import { workspaceFetch } from '@/lib/workspace-storage';
 import { useEffect, useState } from 'react';
 import type { PracticeData } from '@/lib/practice-store';
 import { studyProgress } from '@/lib/study-progress';
@@ -11,7 +12,7 @@ export function StudyProgress({ courseId, versionId, onPractice }: { courseId: s
   useEffect(() => {
     const controller = new AbortController();
     setData(null); setError('');
-    void fetch(`/api/practice?courseId=${encodeURIComponent(courseId)}&versionId=${encodeURIComponent(versionId)}`, { cache: 'no-store', signal: controller.signal }).then(async response => {
+    void workspaceFetch(`/api/practice?courseId=${encodeURIComponent(courseId)}&versionId=${encodeURIComponent(versionId)}`, { cache: 'no-store', signal: controller.signal }).then(async response => {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || '读取练习进度失败。');
       if (!controller.signal.aborted) setData(result);

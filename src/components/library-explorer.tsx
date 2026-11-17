@@ -1,4 +1,5 @@
 'use client';
+import { workspaceFetch, workspaceLocalStorage } from '@/lib/workspace-storage';
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ChevronRight, FileText, Folder, FolderOpen, GripVertical, Image as ImageIcon, ListChecks, MoreHorizontal, PencilLine, Plus, Search, SlidersHorizontal, Trash2, Upload } from 'lucide-react';
@@ -35,7 +36,7 @@ const sizeLabel = (size: number) => size < 1024 * 1024 ? `${Math.max(1, Math.rou
 const dateLabel = (value: string) => new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 
 async function requestJson<T>(method: string, url: string, body: unknown): Promise<T> {
-  const response = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const response = await workspaceFetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error ?? '操作失败，请重试。');
   return result;
@@ -43,7 +44,6 @@ async function requestJson<T>(method: string, url: string, body: unknown): Promi
 
 export function LibraryExplorer({ courseId, materials, folders, mathDemo, onOpen, onDelete, onUpload, onSamples, onReload, onMoved, onToast, status, masterDetail = false, selectedMaterialId, onClearSelection }: Props) {
   const [folderId, setFolderId] = useState('all');
-  const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
   const [folderDialog, setFolderDialog] = useState<{ kind: 'create' | 'create-child' | 'rename' | 'delete'; folder?: MaterialFolder } | null>(null);
   const [collapsedFolders, setCollapsedFolders] = useState<string[]>([]);
@@ -76,18 +76,7 @@ export function LibraryExplorer({ courseId, materials, folders, mathDemo, onOpen
   const shownFolders = folderEntries.filter(entry => entry.parents.every(parent => !collapsedFolders.includes(parent.id)));
   const childFolders = courseFolders.filter(folder => folder.parentId === folderId);
   const scoped = materials.filter(material => folderId === 'all' || (folderId === 'uncategorized' ? !material.folderId : material.folderId === folderId));
-  const counts = {
-    all: scoped.length,
-    ready: scoped.filter(material => (material.status === 'ready' || material.status === 'extracted') && !material.excluded).length,
-    review: scoped.filter(material => material.status === 'review' && !material.excluded && !material.conflictResolution).length,
-    paused: scoped.filter(material => material.conflictResolution === 'paused').length,
-    excluded: scoped.filter(material => material.excluded).length,
-  };
-  const visible = filterLibraryMaterials(scoped.filter(material => material.name.toLowerCase().includes(query.trim().toLowerCase()) && (
-    filter === 'all' || filter === 'ready' && (material.status === 'ready' || material.status === 'extracted') && !material.excluded ||
-    filter === 'review' && material.status === 'review' && !material.excluded && !material.conflictResolution ||
-    filter === 'paused' && material.conflictResolution === 'paused' || filter === 'excluded' && material.excluded
-  )), settings);
+  const visible = filterLibraryMaterials(scoped.filter(material => material.name.toLowerCase().includes(query.trim().toLowerCase())), settings);
   const visibleIds = visible.map(material => material.id).join('|');
   useEffect(() => {
     if (!masterDetail || visible.some(material => material.id === selectedMaterialId)) return;
@@ -97,7 +86,7 @@ export function LibraryExplorer({ courseId, materials, folders, mathDemo, onOpen
   const selected = visible.filter(material => selectedIds.includes(material.id));
   const filterCount = Number(!!(settings.minSize || settings.maxSize)) + Number(!!(settings.fromDate || settings.toDate)) + Number(!!settings.types.length);
   const settingsCount = filterCount + Number(settings.sortBy !== 'createdAt' || settings.direction !== 'desc');
-  const hasFilters = !!query || filter !== 'all' || filterCount > 0;
+  const hasFilters = !!query || filterCount > 0;
   const drag = useLibraryDrag({ scope, visible, selectedIds, disabled: busy || moveOpen || !!folderDialog, onStart: ids => { setSelectedIds(batchMode ? ids : []); setOpenMenu(null); }, onDrop: beginDrop });
   useEffect(() => { if (selectAll.current) selectAll.current.indeterminate = selected.length > 0 && selected.length < visible.length; }, [selected.length, visible.length, batchMode]);
   const activeFolder = courseFolders.find(folder => folder.id === folderId);
@@ -107,7 +96,7 @@ export function LibraryExplorer({ courseId, materials, folders, mathDemo, onOpen
   const dialogCount = materials.filter(material => material.folderId && dialogFolderIds.includes(material.folderId)).length;
   const dialogPath = folderEntries.find(entry => entry.folder.id === folderDialog?.folder?.id)?.path;
 
-  useEffect(() => { setFolderId('all'); setFilter('all'); setQuery(''); setCollapsedFolders([]); setSelectedIds([]); setBatchMode(false); setSettings(defaultLibraryFilters); setSettingsOpen(false); setMoveOpen(false); setMoveMaterials([]); drag.cancel(); }, [courseId]);
+  useEffect(() => { setFolderId('all'); setQuery(''); setCollapsedFolders([]); setSelectedIds([]); setBatchMode(false); setSettings(defaultLibraryFilters); setSettingsOpen(false); setMoveOpen(false); setMoveMaterials([]); drag.cancel(); }, [courseId]);
   useEffect(() => {
     if (!openMenu) return;
     if (masterDetail) scope.current?.querySelector<HTMLElement>('[role="menu"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -154,7 +143,7 @@ export function LibraryExplorer({ courseId, materials, folders, mathDemo, onOpen
   function beginDrop(items: Material[], targetId: string) {
     beginMove(items, targetId, true);
     try {
-      if (window.localStorage.getItem(moveConfirmationDateKey) === localDay()) { setMoveOpen(false); void saveMove(items, targetId, false); }
+      if (workspaceLocalStorage.getItem(moveConfirmationDateKey) === localDay()) { setMoveOpen(false); void saveMove(items, targetId, false); }
     } catch { /* Confirmation remains available when browser storage is unavailable. */ }
   }
   function cancelMove() { if (!busy) { setMoveOpen(false); setMoveMaterials([]); drag.cancel(); } }
@@ -167,7 +156,7 @@ export function LibraryExplorer({ courseId, materials, folders, mathDemo, onOpen
       const result = await requestJson<{ materials: Material[] }>('PATCH', '/api/materials', { courseId, materialIds: items.map(item => item.id), folderId: targetId || null });
       if (!alive.current) { onMoved(result.materials); return; }
       setMoveOpen(false);
-      if (remember) { try { window.localStorage.setItem(moveConfirmationDateKey, localDay()); } catch { /* Moving still works without browser storage. */ } }
+      if (remember) { try { workspaceLocalStorage.setItem(moveConfirmationDateKey, localDay()); } catch { /* Moving still works without browser storage. */ } }
       await drag.finish(targetId);
       onMoved(result.materials);
       if (!alive.current) return;
@@ -179,13 +168,13 @@ export function LibraryExplorer({ courseId, materials, folders, mathDemo, onOpen
       if (alive.current) { drag.cancel(); setMoveOpen(true); setError(cause instanceof Error ? cause.message : '整批移动失败，请重试。'); }
     } finally { submitting.current = false; if (alive.current) setBusy(false); }
   }
-  function selectFolder(id: string) { if (busy || moveOpen) return; setFolderId(id); setFilter('all'); setQuery(''); setOpenMenu(null); setSelectedIds([]); }
+  function selectFolder(id: string) { if (busy || moveOpen) return; setFolderId(id); setQuery(''); setOpenMenu(null); setSelectedIds([]); }
   function applySettings(next: LibraryFilters) {
     const conditions = (value: LibraryFilters) => JSON.stringify({ minSize: value.minSize, maxSize: value.maxSize, unit: value.unit, fromDate: value.fromDate, toDate: value.toDate, types: [...value.types].sort() });
     if (conditions(next) !== conditions(settings)) setSelectedIds([]);
     setSettings(next);
   }
-  function clearFilters() { setQuery(''); setFilter('all'); setSettings(defaultLibraryFilters); setSettingsOpen(false); setSelectedIds([]); }
+  function clearFilters() { setQuery(''); setSettings(defaultLibraryFilters); setSettingsOpen(false); setSelectedIds([]); }
 
   const folderRail = <aside className="library-folder-rail" id={masterDetail ? 'library-master-folders' : undefined} aria-label="资料文件夹">
       <div className="library-folder-heading"><strong>文件夹</strong><button type="button" aria-label="新建文件夹" title="新建文件夹" onClick={() => openFolderDialog('create')}><Plus size={17}/></button></div>
@@ -211,9 +200,8 @@ export function LibraryExplorer({ courseId, materials, folders, mathDemo, onOpen
       </> : <header className="library-files-heading"><div><span>{activeEntry?.parents.length ? activeEntry.path : '当前文件夹'}</span><h2>{title}</h2><p>{hasFilters ? `筛选后 ${visible.length} / ${scoped.length} 份资料` : `${scoped.length} 份资料`}{childFolders.length ? ` · ${childFolders.length} 个子文件夹` : ''}</p></div><div className="library-heading-tools"><label className="search-box"><Search size={16}/><input value={query} disabled={busy} onChange={event => { setQuery(event.target.value); setSelectedIds([]); }} placeholder="搜索当前文件夹" aria-label="搜索当前文件夹"/></label><Button disabled={busy} aria-expanded={settingsOpen} aria-controls="library-filter-settings" className={settingsCount ? 'library-settings-active' : ''} onClick={() => setSettingsOpen(current => !current)}><SlidersHorizontal size={15}/>筛选与排序{settingsCount > 0 && <small>{settingsCount}</small>}</Button><Button disabled={busy || moveOpen} aria-pressed={batchMode} onClick={() => { setBatchMode(current => !current); setSelectedIds([]); setOpenMenu(null); }}><ListChecks size={15}/>{batchMode ? '退出批量管理' : '批量管理'}</Button></div></header>}
       {settingsOpen && <LibraryFilterPanel value={settings} onApply={applySettings}/>}
       {!!childFolders.length && <div className="library-subfolders" aria-label="子文件夹">{childFolders.map(folder => <button type="button" key={folder.id} data-drop-folder={folder.id} data-drop-name={folderEntries.find(entry => entry.folder.id === folder.id)?.path} onClick={() => selectFolder(folder.id)}><Folder size={20}/><span>{folder.name}<small>{materials.filter(material => material.folderId === folder.id).length} 份资料</small></span><ChevronRight size={16}/></button>)}</div>}
-      <div className={`filter-tabs ${selected.length ? 'library-tabs-with-selection' : ''}`} aria-hidden={!!selected.length} role="group" aria-label="资料状态筛选">{([['all','全部',counts.all],['ready',mathDemo ? '演示可用' : '可阅读',counts.ready],['review','待确认',counts.review],['paused','冲突暂停',counts.paused],['excluded','已排除',counts.excluded]] as const).map(([value,label,count]) => <button type="button" key={value} disabled={busy} aria-pressed={filter === value} className={filter === value ? 'selected' : ''} onClick={() => { setFilter(value); setSelectedIds([]); }}>{label}<span>{count}</span></button>)}</div>
       {!!selected.length && <div className="library-selection-bar"><span aria-live="polite">已选 <b>{selected.length}</b> 份</span><Button disabled={busy} onClick={() => beginMove(selected)}>移动到…</Button><Button variant="ghost" disabled={busy} onClick={() => setSelectedIds([])}>取消选择</Button></div>}
-      {!materials.length && !activeFolder ? <div className="library-empty"><FolderOpen size={30}/><h3>这里还没有资料</h3><p>上传讲义、笔记或套卷后，就能放进你创建的文件夹。支持 {supportedFormats}。</p><div><Button onClick={onUpload}><Upload size={16}/>上传第一份资料</Button><Button variant="ghost" onClick={onSamples}>{mathDemo ? '使用中文演示资料' : '导入高考真题'}</Button></div></div> : !visible.length ? <div className="library-empty"><Search size={27}/><h3>{hasFilters ? '没有符合条件的资料' : childFolders.length ? '这里还没有直接存放的资料' : '这个文件夹还是空的'}</h3><p>{hasFilters ? '试试清除搜索、状态或范围筛选。' : '可以从其他文件夹中移动资料到这里。'}</p><Button variant="ghost" onClick={() => hasFilters ? clearFilters() : selectFolder('all')}>{hasFilters ? '清除筛选' : '查看全部资料'}</Button></div> : <div className="material-list">{masterDetail ? batchMode && <label className="library-master-select-all"><input ref={selectAll} className="library-checkbox" type="checkbox" aria-label="全选当前筛选结果" checked={selected.length === visible.length} disabled={busy} onChange={event => setSelectedIds(event.target.checked ? visible.map(item => item.id) : [])}/>全选当前结果</label> : <div className="material-head"><span className="library-material-leading">{batchMode && <input ref={selectAll} className="library-checkbox" type="checkbox" aria-label="全选当前筛选结果" checked={selected.length === visible.length} disabled={busy} onChange={event => setSelectedIds(event.target.checked ? visible.map(item => item.id) : [])}/>}<span>资料名称</span></span><span className="column-chapter">章节归属</span><span className="column-status">状态</span><span>操作</span></div>}{visible.map(material => <div className={`material-row ${masterDetail ? 'library-master-row' : ''} ${masterDetail && selectedMaterialId === material.id ? 'library-row-current' : ''} ${openMenu === material.id ? 'menu-open' : ''} ${selectedIds.includes(material.id) ? 'library-row-selected' : ''} ${drag.draggingIds.includes(material.id) ? 'library-row-dragging' : ''}`} key={material.id}>
+      {!materials.length && !activeFolder ? <div className="library-empty"><FolderOpen size={30}/><h3>这里还没有资料</h3><p>上传讲义、笔记或套卷后，就能放进你创建的文件夹。支持 {supportedFormats}。</p><div><Button onClick={onUpload}><Upload size={16}/>上传第一份资料</Button><Button variant="ghost" onClick={onSamples}>{mathDemo ? '使用中文演示资料' : '导入高考真题'}</Button></div></div> : !visible.length ? <div className="library-empty"><Search size={27}/><h3>{hasFilters ? '没有符合条件的资料' : childFolders.length ? '这里还没有直接存放的资料' : '这个文件夹还是空的'}</h3><p>{hasFilters ? '试试清除搜索或筛选条件。' : '可以从其他文件夹中移动资料到这里。'}</p><Button variant="ghost" onClick={() => hasFilters ? clearFilters() : selectFolder('all')}>{hasFilters ? '清除筛选' : '查看全部资料'}</Button></div> : <div className="material-list">{masterDetail ? batchMode && <label className="library-master-select-all"><input ref={selectAll} className="library-checkbox" type="checkbox" aria-label="全选当前筛选结果" checked={selected.length === visible.length} disabled={busy} onChange={event => setSelectedIds(event.target.checked ? visible.map(item => item.id) : [])}/>全选当前结果</label> : <div className="material-head"><span className="library-material-leading">{batchMode && <input ref={selectAll} className="library-checkbox" type="checkbox" aria-label="全选当前筛选结果" checked={selected.length === visible.length} disabled={busy} onChange={event => setSelectedIds(event.target.checked ? visible.map(item => item.id) : [])}/>}<span>资料名称</span></span><span className="column-chapter">章节归属</span><span className="column-status">状态</span><span>操作</span></div>}{visible.map(material => <div className={`material-row ${masterDetail ? 'library-master-row' : ''} ${masterDetail && selectedMaterialId === material.id ? 'library-row-current' : ''} ${openMenu === material.id ? 'menu-open' : ''} ${selectedIds.includes(material.id) ? 'library-row-selected' : ''} ${drag.draggingIds.includes(material.id) ? 'library-row-dragging' : ''}`} key={material.id}>
         <div className="library-material-leading">{batchMode && <input className="library-checkbox" type="checkbox" aria-label={`选择${material.name}`} disabled={busy} checked={selectedIds.includes(material.id)} onChange={event => setSelectedIds(current => event.target.checked ? [...current, material.id] : current.filter(id => id !== material.id))}/>}<button type="button" className="library-drag-handle" data-material-drag={material.id} aria-label={`拖动${material.name}`} title="拖动到文件夹" disabled={busy || moveOpen} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); beginMove(selectedIds.includes(material.id) ? selected : [material], material.folderId ?? ''); } }}><GripVertical size={15}/></button><button className={`material-name ${masterDetail ? 'library-master-name' : ''}`} disabled={busy} aria-current={masterDetail && selectedMaterialId === material.id ? 'page' : undefined} onClick={() => onOpen(material)}>{masterDetail ? <span className="library-master-row-content"><span className="library-master-row-meta"><span>{material.chapter || documentLabel(material.mime)}</span><time dateTime={material.createdAt}>{dateLabel(material.createdAt)}</time></span><b>{material.name}</b><small className="library-master-row-summary">{documentLabel(material.mime)} · {sizeLabel(material.size)} · {material.origin.startsWith('高考真题') ? '高考真题' : material.fixture ? '自编中文演示资料' : '本机上传'}</small><em className="library-master-row-status">{status(material)}</em></span> : <><span className={`file-icon ${material.status === 'review' ? 'file-note' : ''}`}>{material.mime.startsWith('image/') ? <ImageIcon size={23}/> : <FileText size={23}/>}<small>{documentLabel(material.mime)}</small></span><span><b>{material.name}</b><small>{sizeLabel(material.size)}<i/>{material.origin.startsWith('高考真题') ? '高考真题' : material.fixture ? '自编中文演示资料' : '本机上传'}<i/>{dateLabel(material.createdAt)}</small><em className="mobile-status">{status(material)}</em></span></>}</button></div>
         {!masterDetail && <><span className="column-chapter chapter-label">{material.chapter}</span><span className={`status-badge column-status ${material.conflictResolution === 'paused' || material.status === 'review' ? 'status-warning' : material.conflictResolution === 'accepted_reference' || material.status === 'ready' ? 'status-ready' : 'status-muted'}`}><span/>{status(material)}</span></>}
         <div className="row-actions"><div className="material-more library-item-more"><Button disabled={busy} size="icon" variant="ghost" aria-label={`${material.name}的更多操作`} aria-haspopup="menu" aria-expanded={openMenu === material.id} onClick={() => setOpenMenu(current => current === material.id ? null : material.id)}><MoreHorizontal size={18}/></Button>{openMenu === material.id && <div className="material-more-menu" role="menu"><button type="button" role="menuitem" onClick={() => beginMove([material], material.folderId ?? '')}><Folder size={15}/>移动到文件夹</button><button type="button" role="menuitem" onClick={() => { setOpenMenu(null); onDelete(material); }}><Trash2 size={15}/>删除资料</button></div>}</div></div></div>)}</div>}

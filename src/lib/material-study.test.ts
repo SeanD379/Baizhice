@@ -1,9 +1,17 @@
 import { expect, it } from 'vitest';
-import { conceptReferences, validateSupplementOutput } from './material-study';
+import { conceptReferences, questionOnlyContent, validateSupplementOutput } from './material-study';
+import { parseOriginalQuestions } from './question-bank';
 import type { Reference } from './types';
 
 const quote = '1.金融远期\n2.保本基金\n3.汇率\n8货币市场';
 const refs: Reference[] = quote.split('\n').map((snippet, index) => ({ materialId: 'm', name: '练习题.docx', page: index + 2, location: 'paragraph', snippet, sourceHash: 'source', anchor: { quote, displayPage: 1, rects: [{ x: .1, y: .1, width: .2, height: .2 }] } }));
+
+it('recognizes question-only Word content whose line breaks are stored as entities',()=>{
+  const pages=[{page:1,text:'判断题'},{page:2,text:'1.投资人若想收回股本，可以在二级市场出售股票。&#10;（ ）'},{page:3,text:'2.大额可转让定期存单可以流通转让。&#13;（ ）'}];
+  const questions=parseOriginalQuestions({id:'m',name:'练习题.docx'},pages);
+  expect(questions).toHaveLength(2);expect(questionOnlyContent(pages,questions)).toBe(true);
+  expect(questionOnlyContent([...pages,{page:4,text:'知识点：股份的流通具有特定条件，以下说明这些条件。'}],questions)).toBe(false);
+});
 
 it('associates each concept with its own numbered question and narrows the text anchor', () => {
   for (const [index, title] of ['金融远期（AI 补充草稿）', '保本基金', '汇率', '货币市场'].entries()) {

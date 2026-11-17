@@ -1,4 +1,6 @@
 'use client';
+import { withBasePath } from '@/lib/base-path';
+import { workspaceFetch } from '@/lib/workspace-storage';
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { LoaderCircle } from 'lucide-react';
@@ -17,7 +19,7 @@ function TextPreview({ url, studyAnnotations }: { url: string; studyAnnotations?
   useEffect(() => {
     const controller = new AbortController();
     setText(null); setError('');
-    void fetch(url, { signal: controller.signal }).then(async response => {
+    void workspaceFetch(url, { signal: controller.signal }).then(async response => {
       if (!response.ok) throw new Error('原文件暂时无法读取，请重试或下载查看。');
       const value = await response.text();
       if (!controller.signal.aborted) setText(value);
@@ -29,7 +31,7 @@ function TextPreview({ url, studyAnnotations }: { url: string; studyAnnotations?
 
 export function OriginalFilePreview({ material, initialPage = 1, landmarks, studyAnnotations }: { material: Material; initialPage?: number; landmarks?: ReadingLandmark[]; studyAnnotations?: PreviewAnnotationProps }) {
   const [annotationRoot, setAnnotationRoot] = useState<HTMLDivElement | null>(null);
-  const originalUrl = `/api/files/${material.id}`;
+  const originalUrl = withBasePath(`/api/files/${material.id}`);
   const word = /\.docx$/i.test(material.name);
   const slides = /\.pptx$/i.test(material.name);
   const label = documentLabel(material.mime);

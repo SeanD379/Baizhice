@@ -1,4 +1,5 @@
 'use client';
+import { workspaceFetch } from '@/lib/workspace-storage';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from './ui/button';
 import { CaptureButton } from './notebook-context';
@@ -19,7 +20,7 @@ function FeedbackForm({configured,isSaved=true,...input}:AnswerFeedbackProps) {
     if(request.current||!isSaved)return;
     const controller=new AbortController();request.current=controller;setBusy(true);setError('');setResult(null);
     try {
-      const response=await fetch('/api/practice/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...input,confirmed:true}),signal:controller.signal});
+      const response=await workspaceFetch('/api/practice/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...input,confirmed:true}),signal:controller.signal});
       const data=await response.json();if(!response.ok)throw new Error(data.error||'反馈暂不可用，请稍后重试。');
       if(!controller.signal.aborted)setResult(data);
     } catch(e){if(!controller.signal.aborted)setError(e instanceof Error?e.message:'反馈请求失败，请重试。');}

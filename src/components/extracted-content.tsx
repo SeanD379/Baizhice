@@ -1,4 +1,5 @@
 'use client';
+import { workspaceFetch } from '@/lib/workspace-storage';
 import { useEffect, useState } from 'react';
 import { ArrowDownToLine, ArrowRight, FileSearch, LoaderCircle, RotateCw } from 'lucide-react';
 import { Button } from './ui/button';
@@ -17,8 +18,8 @@ export function ExtractedContent({material,initialPage=1,readingMode=false,onCom
   const [pickedPosition,setPickedPosition]=useState(false);
   useEffect(()=>setPage(initialPage),[initialPage]);
   const url=`/api/materials/${material.id}/extraction`;
-  useEffect(()=>{let active=true;let timer:ReturnType<typeof setTimeout>;async function refresh(){try{const response=await fetch(url,{cache:'no-store'});const data=await response.json();if(!response.ok)throw new Error(data.error);if(active){setResult(data.result);setBusy(data.running);if(data.running)timer=setTimeout(refresh,1500);}}catch(e){if(active)setError(e instanceof Error?e.message:'识别记录暂时不可用。');}finally{if(active)setLoading(false);}}void refresh();return()=>{active=false;clearTimeout(timer);};},[url]);
-  async function extract(continuing=false){setBusy(true);setError('');try{const response=await fetch(url,{method:'POST',...(continuing?{headers:{'Content-Type':'application/json'},body:JSON.stringify({continue:true})}:{})});const data=await response.json();if(!response.ok)throw new Error(data.error);setResult(data.result);if(!continuing)setPage(1);await onComplete();}catch(e){setError(e instanceof Error?e.message:'识别失败，请重试。');}finally{setBusy(false);}}
+  useEffect(()=>{let active=true;let timer:ReturnType<typeof setTimeout>;async function refresh(){try{const response=await workspaceFetch(url,{cache:'no-store'});const data=await response.json();if(!response.ok)throw new Error(data.error);if(active){setResult(data.result);setBusy(data.running);if(data.running)timer=setTimeout(refresh,1500);}}catch(e){if(active)setError(e instanceof Error?e.message:'识别记录暂时不可用。');}finally{if(active)setLoading(false);}}void refresh();return()=>{active=false;clearTimeout(timer);};},[url]);
+  async function extract(continuing=false){setBusy(true);setError('');try{const response=await workspaceFetch(url,{method:'POST',...(continuing?{headers:{'Content-Type':'application/json'},body:JSON.stringify({continue:true})}:{})});const data=await response.json();if(!response.ok)throw new Error(data.error);setResult(data.result);if(!continuing)setPage(1);await onComplete();}catch(e){setError(e instanceof Error?e.message:'识别失败，请重试。');}finally{setBusy(false);}}
   const selected=result?.pages.find(p=>p.page===page);
   const grouped=/\.(docx|txt)$/i.test(material.name),groups=result?groupDocumentPages(result.pages):[];
   const chosenGroup=(page===1&&!pickedPosition?groups.find(group=>group.kind==='question'):groups.find(group=>group.pages.some(part=>part.page===page)))??groups[0];

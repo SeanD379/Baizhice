@@ -1,4 +1,5 @@
 'use client';
+import { workspaceFetch } from '@/lib/workspace-storage';
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, Bookmark, BookOpen, CalendarDays, Check, ChevronRight, CircleAlert, FileInput, FileText, History, Layers3, ListChecks, LoaderCircle, NotebookPen, PencilLine, Play, Plus, RotateCw, Sparkles } from 'lucide-react';
 import gsap from 'gsap';
@@ -10,7 +11,7 @@ import { collectedPracticeFiles, mistakeFiles, studyStatus, type HubRecord, type
 gsap.registerPlugin(useGSAP);
 export const practiceTitles = { knowledge: '知识点巩固', mistakes: '错题复盘', papers: '套卷练习' };
 export async function hubRequest<T>(url: string, body?: object): Promise<T> {
-  const response = await fetch(url, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { cache: 'no-store' });
+  const response = await workspaceFetch(url, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { cache: 'no-store' });
   const result = await response.json().catch(() => ({ error: '服务暂时不可用，请稍后重试。' }));
   if (!response.ok) throw Error(result.error || '读取失败，请重试。'); return result;
 }

@@ -1,4 +1,6 @@
 'use client';
+import { withBasePath } from '@/lib/base-path';
+import { workspaceFetch, workspaceLocalStorage } from '@/lib/workspace-storage';
 import { useEffect, useRef, useState } from 'react';
 import { MoreHorizontal, Share2, LoaderCircle, ListChecks, FileText } from 'lucide-react';
 import { QuestionShare } from './question-share';
@@ -21,7 +23,7 @@ import SpotlightCard from './react-bits/SpotlightCard';
 type Props={courseId:string;materials:Material[];context:'knowledge'|'paper';initialMaterialId?:string;listMaterialId?:string;initialQuestion?:string|number;initialScope?:string;management?:boolean;importMistakes?:boolean;defaultOrigin?:'original'|'variant';selectionOnlyOnEntry?:boolean;compactRound?:boolean;onSource?:(ref:Reference)=>void;onStart?:(scope:string)=>void|Promise<void>;registerLeave?:(flush:(()=>Promise<boolean>)|null)=>void;registerBackAction?:(action:PracticeBackAction|null)=>void};
 const provenance={original:'原文',supplement:'补充',manual:'我的修订',ai:'AI 参考答案',none:'待核对',self:'我的自评'};
 async function bankRequest(method:string,body?:object,courseId?:string) {
-  const response=await fetch(`/api/question-banks${method==='GET'?`?courseId=${encodeURIComponent(courseId??'')}`:''}`,{method,headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
+  const response=await workspaceFetch(`/api/question-banks${method==='GET'?`?courseId=${encodeURIComponent(courseId??'')}`:''}`,{method,headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
   const result=await response.json();if(!response.ok)throw Error(result.error||'原题读取失败，请重试。');return result as {banks?:QuestionBankData[];bank?:QuestionBankData;configured:boolean;model:string};
 }
 export function OriginalPracticeCenter({courseId,materials,context,initialMaterialId,listMaterialId,initialQuestion,initialScope,management=false,importMistakes=false,defaultOrigin,selectionOnlyOnEntry=false,compactRound=false,onSource,onStart,registerLeave,registerBackAction}:Props) {
@@ -89,7 +91,7 @@ export function OriginalPracticeCenter({courseId,materials,context,initialMateri
   const selectionLimit=origin==='variant'?5:10;
   const chosen=context==='knowledge'?(chosenIds?filtered.filter(q=>chosenIds.includes(q.id)).slice(0,selectionLimit):filtered.slice(0,selectionLimit)):filtered;
   const sections=[...new Set(filtered.map(q=>q.section||'原题'))];
-  async function readExamProtection(){const response=await fetch(`/api/practice-hub?courseId=${encodeURIComponent(courseId)}&section=${context==='paper'?'papers':'knowledge'}`,{cache:'no-store'});const summary=await response.json();if(!response.ok||!Array.isArray(summary.withheldMaterials))throw Error(summary.error||'考试状态读取失败，请重试。');return summary.withheldMaterials as string[];}
+  async function readExamProtection(){const response=await workspaceFetch(`/api/practice-hub?courseId=${encodeURIComponent(courseId)}&section=${context==='paper'?'papers':'knowledge'}`,{cache:'no-store'});const summary=await response.json();if(!response.ok||!Array.isArray(summary.withheldMaterials))throw Error(summary.error||'考试状态读取失败，请重试。');return summary.withheldMaterials as string[];}
   async function perform(method:string,body:object){setBusy(true);setError('');try{if(!await flush.current())return false;if(management||(selectionEntry&&!active)){setProtectedMaterials(null);setProtectedMaterials(await readExamProtection());}apply(await bankRequest(method,method==='GET'?undefined:{courseId,...body},courseId));return true;}catch(e){setError(e instanceof Error?e.message:'操作失败。');return false;}finally{setBusy(false);}}
   async function start(){setBusy(true);setError('');try{if(!await flush.current())return;const data=await originalRequest({action:'original-load',courseId,context,questionIds:chosen.map(q=>q.id),mode,newRound:true});if(onStart)await onStart(data.scope);else{setActive(data);setExamHidden(data.session.mode==='exam'&&!data.session.submitted);}}catch(e){setError(e instanceof Error?e.message:'启动失败。');}finally{setBusy(false);}}
   async function importSelected(){setBusy(true);setError('');try{const selected=available.filter(b=>!b.stale).flatMap(b=>b.questions).filter(q=>importIds.includes(q.id));if(!study||selected.length!==importIds.length||!selected.length)throw Error('所选原题来源已更新，请重新核对。');await study.change(selected.map(q=>({engine:'original',questionId:q.id,materialId:q.materialId})),{manualWrong:true,...(importTags.trim()?{tags:importTags.split(/[,，]/).map(t=>t.trim()).filter(Boolean)}:{})});setImportMessage(`已将 ${selected.length} 道已核对题目加入错题集。`);setImportIds([]);}catch(e){setError(e instanceof Error?e.message:'导入失败，请重试。');}finally{setBusy(false);}}
@@ -146,7 +148,7 @@ export function OriginalPracticeCenter({courseId,materials,context,initialMateri
 
 function AnswerSources({question}:{question:OriginalQuestion}) {
   if(!question.answerRefs?.length)return null;
-  return <details className="original-answer-citations"><summary>参考答案出处</summary>{question.answerRefs.map((reference,index)=><div key={index}><a href={`/api/files/${encodeURIComponent(reference.materialId)}${reference.location==='page'?`#page=${reference.page}`:''}`} target="_blank" rel="noreferrer">{reference.name} · {referenceLocation(reference)}</a><blockquote>{reference.snippet}</blockquote></div>)}</details>;
+  return <details className="original-answer-citations"><summary>参考答案出处</summary>{question.answerRefs.map((reference,index)=><div key={index}><a href={withBasePath(`/api/files/${encodeURIComponent(reference.materialId)}${reference.location==='page'?`#page=${reference.page}`:''}`)} target="_blank" rel="noreferrer">{reference.name} · {referenceLocation(reference)}</a><blockquote>{reference.snippet}</blockquote></div>)}</details>;
 }
 
 function Sources({question,onOpen,onSource}:{question:OriginalQuestion;onOpen?:()=>void;onSource?:(ref:Reference)=>void}) {
@@ -154,23 +156,23 @@ function Sources({question,onOpen,onSource}:{question:OriginalQuestion;onOpen?:(
   const currentSource=useRef<HTMLElement|null>(null),name=question.sources[0]?.name??'原文件';
   const variant=question.origin==='variant';
   const groups=extraction?groupDocumentPages(extraction.pages):[];
-  function fileLink(source:OriginalQuestion['sources'][number]){return `/api/files/${encodeURIComponent(question.materialId)}${/\.pdf$/i.test(source.name)&&source.location==='page'?`#page=${source.page}`:''}`;}
+  function fileLink(source:OriginalQuestion['sources'][number]){return withBasePath(`/api/files/${encodeURIComponent(question.materialId)}${/\.pdf$/i.test(source.name)&&source.location==='page'?`#page=${source.page}`:''}`);}
   async function read(){
     onOpen?.();
     setOpen(true);setLoading(true);setError('');
     try {
-      const response=await fetch(`/api/materials/${encodeURIComponent(question.materialId)}/extraction`,{cache:'no-store'}),data=await response.json();
+      const response=await workspaceFetch(`/api/materials/${encodeURIComponent(question.materialId)}/extraction`,{cache:'no-store'}),data=await response.json();
       if(!response.ok)throw Error(data.error||'原文读取失败。');
       setExtraction(data.result??null);if(!data.result)setError(data.running?'原文仍在提取，请稍后重新读取。':'暂无完整原文记录，请回到文件选择读取完整原题。');
     }catch(e){setError(e instanceof Error?e.message:'原文读取失败。');}finally{setLoading(false);}
   }
   useEffect(()=>{if(open&&extraction)currentSource.current?.scrollIntoView({block:'start'});},[open,extraction]);
-  return <div className="original-sources">{!onSource&&question.sources.map((s,i)=><a key={i} href={fileLink(s)} target="_blank" rel="noreferrer" onClick={onOpen}>{variant?'查看生成依据':'打开原文件核对'} · {s.name} · {sourceLocation(s.name,s.page)}（原文可能包含答案）</a>)}<Button size="sm" variant="ghost" onClick={()=>{if(onSource&&question.sources[0]){onOpen?.();onSource({materialId:question.materialId,...question.sources[0]});}else void read();}}>{onSource?variant?'查看生成依据':'查看出处':variant?'对照生成依据原文':'对照完整原文'}{onSource&&question.sources[0]?` · ${sourceLocation(name,question.sources[0].page)}`:'（原文可能含答案）'}</Button>
+  return <div className="original-sources">{!onSource&&question.sources.map((s,i)=><a key={i} href={withBasePath(fileLink(s))} target="_blank" rel="noreferrer" onClick={onOpen}>{variant?'查看生成依据':'打开原文件核对'} · {s.name} · {sourceLocation(s.name,s.page)}（原文可能包含答案）</a>)}<Button size="sm" variant="ghost" onClick={()=>{if(onSource&&question.sources[0]){onOpen?.();onSource({materialId:question.materialId,...question.sources[0]});}else void read();}}>{onSource?variant?'查看生成依据':'查看出处':variant?'对照生成依据原文':'对照完整原文'}{onSource&&question.sources[0]?` · ${sourceLocation(name,question.sources[0].page)}`:'（原文可能含答案）'}</Button>
     <Modal open={open} onOpenChange={setOpen} title={`${name} · 完整原文对照`} description={`${variant?'以下为生成依据，AI 自编变式不在原文件中。':''}主动打开的原文件内容可能包含答案。文字按原文顺序分组，题干、选项与共同材料均保留；公式与图形请同时查看原文件。`} error={error} wide>
       {loading&&<p role="status">正在读取本机原文…</p>}<Button size="sm" disabled={loading} onClick={()=>void read()}>重新读取原文</Button>
       <nav className="original-source-nav" aria-label="原题来源位置">{question.sources.map((source,i)=>{const group=groups.find(g=>g.pages.some(p=>p.page===source.page));return <span key={i}>{group&&<a href={`#raw-source-${question.materialId}-${group.id}`}>{sourceLocation(source.name,source.page)} · 定位原文</a>}<a href={fileLink(source)} target="_blank" rel="noreferrer">打开原文件 · {sourceLocation(source.name,source.page)}</a></span>;})}</nav>
       {extraction?.state==='partial'&&<p role="status">原文提取不完整，请核对原文件及各位置提示。</p>}
-      <div className="original-source-content">{groups.map(group=>{const current=group.pages.some(p=>question.sources.some(s=>s.page===p.page));return <section key={group.id} id={`raw-source-${question.materialId}-${group.id}`} data-source-current={current?'true':undefined} ref={node=>{if(group.pages.some(p=>p.page===question.sources[0]?.page))currentSource.current=node;}}><h3>{sourceLocation(name,group.pages[0].page)}{group.pages.length>1?` 至 ${sourceLocation(name,group.pages.at(-1)!.page)}`:''}{current?' · 本题原文':''}</h3><pre>{group.text}</pre>{group.pages.flatMap(p=>p.warnings??[]).map((warning,i)=><p key={i}>{warning}</p>)}{group.pages.flatMap(p=>p.blocks??[]).filter(block=>block.type==='image'&&block.assetPath).map((block,i)=><figure key={i}><img src={`/api/materials/${encodeURIComponent(question.materialId)}/assets?path=${encodeURIComponent(block.assetPath!)}`} alt={block.marker??'原文图片'}/></figure>)}</section>;})}</div>
+      <div className="original-source-content">{groups.map(group=>{const current=group.pages.some(p=>question.sources.some(s=>s.page===p.page));return <section key={group.id} id={`raw-source-${question.materialId}-${group.id}`} data-source-current={current?'true':undefined} ref={node=>{if(group.pages.some(p=>p.page===question.sources[0]?.page))currentSource.current=node;}}><h3>{sourceLocation(name,group.pages[0].page)}{group.pages.length>1?` 至 ${sourceLocation(name,group.pages.at(-1)!.page)}`:''}{current?' · 本题原文':''}</h3><pre>{group.text}</pre>{group.pages.flatMap(p=>p.warnings??[]).map((warning,i)=><p key={i}>{warning}</p>)}{group.pages.flatMap(p=>p.blocks??[]).filter(block=>block.type==='image'&&block.assetPath).map((block,i)=><figure key={i}><img src={withBasePath(`/api/materials/${encodeURIComponent(question.materialId)}/assets?path=${encodeURIComponent(block.assetPath!)}`)} alt={block.marker??'原文图片'}/></figure>)}</section>;})}</div>
     </Modal>
   </div>;
 }
@@ -188,9 +190,9 @@ export function OriginalRound({initial,courseId,externalBusy,configured,banks,on
   const [preferences,setPreferences]=useState<{font:'small'|'standard'|'large';autoExpand:boolean;autoNext:boolean}>({font:'standard',autoExpand:true,autoNext:false});
   const preferencesLoaded=useRef(false);
   useEffect(()=>{
-    try{const saved=JSON.parse(localStorage.getItem('lms.practice.preferences')??'{}');setPreferences({font:['small','standard','large'].includes(saved.font)?saved.font:'standard',autoExpand:typeof saved.autoExpand==='boolean'?saved.autoExpand:true,autoNext:saved.autoNext===true});}catch{/* Defaults work without browser storage. */}
+    try{const saved=JSON.parse(workspaceLocalStorage.getItem('lms.practice.preferences')??'{}');setPreferences({font:['small','standard','large'].includes(saved.font)?saved.font:'standard',autoExpand:typeof saved.autoExpand==='boolean'?saved.autoExpand:true,autoNext:saved.autoNext===true});}catch{/* Defaults work without browser storage. */}
   },[]);
-  useEffect(()=>{if(!preferencesLoaded.current){preferencesLoaded.current=true;return;}try{localStorage.setItem('lms.practice.preferences',JSON.stringify(preferences));}catch{/* Settings remain usable for this visit. */}},[preferences]);
+  useEffect(()=>{if(!preferencesLoaded.current){preferencesLoaded.current=true;return;}try{workspaceLocalStorage.setItem('lms.practice.preferences',JSON.stringify(preferences));}catch{/* Settings remain usable for this visit. */}},[preferences]);
   const [expanded,setExpanded]=useState(true),reviewRequested=useRef(false);
   useEffect(()=>{setExpanded(reviewRequested.current||preferences.autoExpand);reviewRequested.current=false;},[current?.id,preferences.autoExpand]);
   const [countdown,setCountdown]=useState<number|null>(null),advanceTimer=useRef<ReturnType<typeof setInterval>|null>(null),advanceGeneration=useRef(0);
@@ -201,11 +203,11 @@ export function OriginalRound({initial,courseId,externalBusy,configured,banks,on
   const variantCount=data.questions.filter(q=>q.origin==='variant').length,remainingVariants=5-variantCount;
   const currentBank=banks.find(b=>!b.stale&&b.questions.some(q=>q.id===current?.id));
   const liveQuestion=currentBank?.questions.find(question=>question.id===current?.id);
-  const [answerPolicy,setAnswerPolicy]=useState<'ask'|'on'|'off'>(()=>{try{const value=localStorage.getItem(`lms.answer.consent:${courseId}`);return value==='true'?'on':value==='false'?'off':'ask';}catch{return 'ask';}}),[answerConsent,setAnswerConsent]=useState(false),[answerError,setAnswerError]=useState('');
+  const [answerPolicy,setAnswerPolicy]=useState<'ask'|'on'|'off'>(()=>{try{const value=workspaceLocalStorage.getItem(`lms.answer.consent:${courseId}`);return value==='true'?'on':value==='false'?'off':'ask';}catch{return 'ask';}}),[answerConsent,setAnswerConsent]=useState(false),[answerError,setAnswerError]=useState('');
   const requestedAnswers=useRef(new Set<string>()),synchronizing=useRef(false),refreshRef=useRef(refreshAnswers);refreshRef.current=refreshAnswers;
   const answerConsentKey=`lms.answer.consent:${courseId}`;
-  useEffect(()=>{try{const preference=localStorage.getItem(answerConsentKey);setAnswerPolicy(preference==='true'?'on':preference==='false'?'off':'ask');}catch{/* Explain the send scope before generating. */}},[answerConsentKey]);
-  function answerPreference(value:boolean){setAnswerPolicy(value?'on':'off');setAnswerConsent(false);try{localStorage.setItem(answerConsentKey,String(value));}catch{/* The setting still applies to this visit. */}}
+  useEffect(()=>{try{const preference=workspaceLocalStorage.getItem(answerConsentKey);setAnswerPolicy(preference==='true'?'on':preference==='false'?'off':'ask');}catch{/* Explain the send scope before generating. */}},[answerConsentKey]);
+  function answerPreference(value:boolean){setAnswerPolicy(value?'on':'off');setAnswerConsent(false);try{workspaceLocalStorage.setItem(answerConsentKey,String(value));}catch{/* The setting still applies to this visit. */}}
   async function ensureAnswer(retry=false){
     if(!currentBank||!current||session.finished||session.submitted)return;
     const key=`${currentBank.id}:${current.id}`;if(requestedAnswers.current.has(key)&&!retry)return;requestedAnswers.current.add(key);setAnswerError('');
@@ -302,7 +304,7 @@ export function OriginalRound({initial,courseId,externalBusy,configured,banks,on
     {displayingResults&&<OriginalPracticeResults session={session} questions={data.questions} celebrate={celebrateResults} disabled={busy||!!error} restartMode={restartMode} onRestartMode={setRestartMode} onRestart={()=>{setCelebrateResults(false);void action('original-restart',{mode:restartMode}).then(ok=>{if(ok)setShowResults(false);});}} onReview={reviewResult}/>}
     {!displayingResults&&current&&<article className="practice-paper original-paper"><div className="practice-paper-meta"><span>{compact?originalKindNames[current.kind]:`${current.origin==='variant'?'知识点变式':current.section} · ${originalKindNames[current.kind]}`} · {current.origin==='variant'?'AI 自编':'原题'}</span><div className="original-paper-tools">{compact&&<span className="answer-board-save" role="status" title={error||message}>{error?'保存失败':message.startsWith('等待保存')?'待保存':message.startsWith('正在保存')?'保存中':busy?'处理中':message.startsWith('已保存')?'已保存':''}</span>}<span>{session.index+1} / {session.ids.length}</span><>{compact&&<Button variant="ghost" size="sm" aria-label="打开答题卡" onClick={()=>{cancelAdvance();setAnswerSheet(true);}}><ListChecks size={17}/>答题卡</Button>}</><Button variant="ghost" size="sm" aria-label="更多设置" onClick={()=>{cancelAdvance();setMore(true);}}><MoreHorizontal size={17}/>更多</Button></div></div><h2 ref={heading} tabIndex={-1}>{current.origin==='variant'?`AI 变式 ${variantNumber(current.id)}`:`第 ${current.number} 题`}</h2>
       {!compact&&<QuestionStudyControls question={{engine:'original',questionId:current.id,materialId:current.materialId}}/>}
-      {current.context&&<div className="original-context"><Markdown text={current.context}/></div>}<Markdown text={current.prompt}/>{current.media?.map((m,i)=><figure key={i}><img src={m.url} alt={m.label}/><figcaption>{m.label}</figcaption></figure>)}
+      {current.context&&<div className="original-context"><Markdown text={current.context}/></div>}<Markdown text={current.prompt}/>{current.media?.map((m,i)=><figure key={i}><img src={withBasePath(m.url)} alt={m.label}/><figcaption>{m.label}</figcaption></figure>)}
       {!memorizing&&<fieldset className="original-answer" disabled={busy||!!error||session.finished||!!result&&!hidden}><legend>我的答案</legend>
         {current.kind==='single'||current.kind==='multiple'?<div className="practice-options">{current.options.map(o=><label key={o.label}><input type={current.kind==='multiple'?'checkbox':'radio'} name={`answer-${current.id}`} value={o.label} checked={current.kind==='multiple'?(session.answers[current.id]??'').split(',').includes(o.label):session.answers[current.id]===o.label} onChange={e=>{const checked=e.target.checked;answer(current.kind==='multiple'?previous=>[...new Set(checked?[...previous.split(',').filter(Boolean),o.label]:previous.split(',').filter(v=>v!==o.label))].sort().join(','):o.label);}}/><div className="original-option-content"><span className="original-option-label">{o.label}.</span><Markdown text={o.text}/></div></label>)}</div>:current.kind==='judge'?<div className="practice-options">{['对','错'].map(label=><label key={label}><input type="radio" name={`answer-${current.id}`} value={label} checked={session.answers[current.id]===label} onChange={()=>answer(label)}/>{label}</label>)}</div>:current.kind==='fill'?<input aria-label="填空答案" value={session.answers[current.id]??''} maxLength={8000} onChange={e=>answer(e.target.value)}/>:<><label htmlFor={`original-answer-${current.id}`}>写下完整过程与结论</label><RichAnswerEditor key={current.id} id={`original-answer-${current.id}`} value={session.answers[current.id]??''} disabled={busy||!!error||session.finished||!!result&&!hidden} onChange={answer}/></>}
       </fieldset>}

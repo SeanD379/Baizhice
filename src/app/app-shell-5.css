@@ -268,10 +268,6 @@ body:has(.app-shell-5) .conversation-history-search:focus-within { outline: 2px 
   .app-shell-5 .library-master-list .search-box.library-master-search { flex-shrink: 0; width: auto; max-width: none; height: 44px; margin: 0 18px 12px; padding: 0 13px; border: 1px solid var(--theme-border); border-radius: 8px; background: var(--theme-subtle); color: var(--theme-muted); }
   .app-shell-5 .library-master-search input { width: 100%; font-size: 14px; color: var(--theme-text); }
   .app-shell-5 .library-master-search input::placeholder { color: var(--theme-muted); }
-  .app-shell-5 .library-master-list .filter-tabs { display: flex; flex-shrink: 0; gap: 6px; height: 42px; margin: 0 18px 12px; padding: 0; border: 0; border-radius: 0; background: var(--theme-surface); overflow-x: auto; scrollbar-width: none; }
-  .app-shell-5 .library-master-list .filter-tabs button { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; height: 36px; padding: 0 10px; border: 0; border-radius: 7px; background: var(--theme-hover); color: var(--theme-text); font-size: 12px; font-weight: 500; }
-  .app-shell-5 .library-master-list .filter-tabs button.selected { background: var(--theme-action); color: var(--theme-action-text); }
-  .app-shell-5 .library-master-list .filter-tabs button>span { display: none; }
   .app-shell-5 .library-master-list .material-list { flex: 1; min-height: 0; margin: 0; border: 0; border-radius: 0; background: var(--theme-surface); overflow-y: auto; scrollbar-color: var(--theme-border) transparent; scrollbar-width: thin; }
   .app-shell-5 .library-master-list .material-row.library-master-row { display: flex; position: relative; min-height: 126px; margin: 0 4px; padding: 15px 15px 14px 17px; border: 0; border-left: 3px solid transparent; border-bottom: 1px solid var(--theme-border); border-radius: 0; background: var(--theme-surface); }
   .app-shell-5 .library-master-list .material-row.library-master-row:hover { background: var(--theme-subtle); }
@@ -307,7 +303,7 @@ body:has(.app-shell-5) .conversation-history-search:focus-within { outline: 2px 
   .app-shell-5 .library-master-list .library-filter-panel { flex-shrink: 1; min-height: 0; max-height: 36dvh; margin: 0 18px 12px; padding: 12px; background: var(--theme-subtle); border-color: var(--theme-border); color: var(--theme-text); overflow: auto; }
   .app-shell-5 .library-master-list .library-filter-fields { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .app-shell-5 .library-master-list .library-subfolders { flex-shrink: 0; grid-template-columns: minmax(0, 1fr); padding: 0 18px 10px; }
-  .app-shell-5 .library-master-list .library-selection-bar { flex-shrink: 0; height: 42px; margin: -54px 18px 12px; background: var(--theme-hover); border: 0; border-radius: 7px; color: var(--theme-text); }
+  .app-shell-5 .library-master-list .library-selection-bar { flex-shrink: 0; height: 42px; margin: 0 18px 12px; background: var(--theme-hover); border: 0; border-radius: 7px; color: var(--theme-text); }
   .app-shell-5 .library-master-select-all { display: flex; align-items: center; gap: 8px; padding: 9px 18px; color: var(--theme-text); font-size: 12px; }
   .app-shell-5 .library-master-detail>.library-reader { display: flex; flex: 1; flex-direction: column; position: relative; top: auto; right: auto; width: 0; min-width: 0; min-height: 0; height: 100%; border: 0; border-radius: 0; background: var(--theme-surface); color: var(--theme-text); overflow: hidden; animation: none; }
   .app-shell-5 .library-reader .inspector-header { display: flex; position: relative; flex-shrink: 0; height: 72px; min-height: 72px; padding: 0 28px; border: 0; background: var(--theme-surface); color: var(--theme-text); gap: 14px; }

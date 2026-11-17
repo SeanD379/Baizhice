@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { useReducedMotion } from 'motion/react';
+import { useAppReducedMotion as useReducedMotion } from './user-preferences';
 import { ArrowRight, Check, CheckCheck, ClipboardCheck, RotateCcw, Sparkles, Trophy } from 'lucide-react';
 import type { OriginalMode, OriginalQuestion, OriginalSessionState } from '@/lib/question-bank-types';
 import { summarizeOriginalRound } from '@/lib/original-practice-results';

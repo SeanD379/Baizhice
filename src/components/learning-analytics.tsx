@@ -1,4 +1,5 @@
 'use client';
+import { workspaceFetch } from '@/lib/workspace-storage';
 
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, BookOpen, CalendarDays, CheckCircle2, FileText, History, ListChecks, RefreshCw, RotateCcw } from 'lucide-react';
@@ -66,7 +67,7 @@ export function LearningAnalytics({ courseId, onOpenPractice, onLibrary, onOutli
     const controller = new AbortController();
     setData(null); setLoading(true); setError('');
     setSelectedDay(null); setSelectedTopic(null);
-    void fetch('/api/learning-analysis?' + new URLSearchParams({ courseId, period: String(period) }), { cache: 'no-store', signal: controller.signal })
+    void workspaceFetch('/api/learning-analysis?' + new URLSearchParams({ courseId, period: String(period) }), { cache: 'no-store', signal: controller.signal })
       .then(async response => {
         const result = await response.json();
         if (!response.ok) throw new Error(result.error ?? '读取学习记录失败。');

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act } from 'react';
+import { UserPreferencesProvider } from './user-preferences';
 import { createRoot, type Root } from 'react-dom/client';
 import { LearningHome } from './learning-home';
 
@@ -52,6 +53,37 @@ it('keeps module navigation out of the empty chat home', async () => {
   expect(container.textContent).not.toContain('选择已有资料');
   expect(container.textContent).not.toContain('整理复习材料');
   expect(container.textContent).not.toContain('查看复习练习');
+});
+it('reports unsent text and attachment state for login navigation without clearing either', async () => {
+  const onPendingChange = vi.fn();
+  await act(async () => root.render(<LearningHome {...props} onPendingChange={onPendingChange}/>));
+  expect(onPendingChange).toHaveBeenLastCalledWith(false);
+  const quickAction = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('整理重点'))!;
+  await act(async () => quickAction.click());
+  expect(onPendingChange).toHaveBeenLastCalledWith(true);
+  const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+  Object.defineProperty(input, 'files', { configurable: true, value: [new File(['内容'], 'notes.txt', { type: 'text/plain' })] });
+  await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+  expect(container.textContent).toContain('notes.txt');
+  expect(container.querySelector<HTMLTextAreaElement>('textarea')?.value).toContain('复习重点');
+  await act(async () => root.unmount());
+  expect(onPendingChange).toHaveBeenLastCalledWith(false);
+  root = createRoot(container);
+});
+it('retains files when the browser clears a live selection before queued state updates run', async () => {
+  await act(async () => root.render(<LearningHome {...props}/>));
+  const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+  let selected: File[] = [];
+  Object.defineProperty(input, 'files', { configurable: true, get: () => selected });
+  Object.defineProperty(input, 'value', { configurable: true, set: () => { selected.length = 0; } });
+  await act(async () => {
+    selected = [new File(['第一份内容'], 'first.txt', { type: 'text/plain' })];
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    selected = [new File(['第二份内容'], 'second.txt', { type: 'text/plain' })];
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  expect(container.textContent).toContain('first.txt');
+  expect(container.textContent).toContain('second.txt');
 });
 
 it('extracts three attached files in sequence before sending them to chat', async () => {
@@ -253,6 +285,21 @@ it('does not send while a Chinese input method is composing, then sends on ordin
   expect(vi.mocked(fetch).mock.calls.some(([url, init]) => url === '/api/chat' && init?.method === 'POST')).toBe(false);
   await act(async () => textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
   expect(vi.mocked(fetch).mock.calls.filter(([url, init]) => url === '/api/chat' && init?.method === 'POST')).toHaveLength(1);
+});
+
+it('uses the saved modifier shortcut without sending on plain Enter or during composition', async () => {
+  localStorage.setItem('lms.user-preferences.v1', JSON.stringify({ sendShortcut: 'mod-enter' }));
+  await act(async () => root.render(<UserPreferencesProvider><LearningHome {...props}/></UserPreferencesProvider>));
+  let textarea!: HTMLTextAreaElement;
+  await act(async () => { textarea = changeDraft('解释条件概率'); });
+  expect(container.textContent).toContain('Ctrl / ⌘ + Enter 发送');
+  await act(async () => textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await act(async () => textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, isComposing: true, bubbles: true })));
+  expect(container.querySelector('textarea')!.value).toBe('解释条件概率');
+  expect(vi.mocked(fetch).mock.calls.some(([url, init]) => url === '/api/chat' && init?.method === 'POST')).toBe(false);
+  await act(async () => textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true })));
+  expect(vi.mocked(fetch).mock.calls.filter(([url, init]) => url === '/api/chat' && init?.method === 'POST')).toHaveLength(1);
+  localStorage.removeItem('lms.user-preferences.v1');
 });
 
 it('clears progress on course changes and ignores the previous course response', async () => {

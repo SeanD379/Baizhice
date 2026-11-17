@@ -1,10 +1,13 @@
 'use client';
+import { withBasePath } from '@/lib/base-path';
+import { workspaceFetch, notifyAuthChanged, workspaceLocalStorage } from '@/lib/workspace-storage';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { ArrowDownToLine, ArrowLeft, ArrowRight, BookOpen, Check, CheckCheck, ChevronDown, ChevronRight, CircleAlert, ExternalLink, FileText, FolderOpen, History, LayoutDashboard, ListChecks, LoaderCircle, Menu, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, PencilLine, Plus, RotateCw, Search, ShieldCheck, Trash2, TrendingUp, Upload, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowLeft, ArrowRight, BookOpen, Check, CheckCheck, ChevronDown, ChevronRight, CircleAlert, ExternalLink, FileText, FolderOpen, History, LayoutDashboard, ListChecks, LoaderCircle, Menu, MessageSquare, PanelLeftClose, PanelLeftOpen, PencilLine, Plus, RotateCw, Search, ShieldCheck, Trash2, TrendingUp, Upload, X } from 'lucide-react';
 import { Button } from './ui/button';
-import { ThemeToggle } from './ui-theme';
+import { ProfileMenu, SettingsPanel } from './user-settings';
+import { useUserPreferences } from './user-preferences';
 import { Modal } from './ui/modal';
 import { Markdown } from './markdown';
 import { ExtractedContent } from './extracted-content';
@@ -108,13 +111,17 @@ function ReviewSourcePicker({ materials, selectedIds, purpose, onSelect, onConti
   </section>;
 }
 async function api<T>(url: string, body?: unknown, method = 'POST'): Promise<T> {
-  const response = await fetch(url, body === undefined ? { cache: 'no-store' } : { method, headers: body instanceof FormData ? undefined : { 'Content-Type': 'application/json' }, body: body instanceof FormData ? body : JSON.stringify(body) });
+  const response = await workspaceFetch(url, body === undefined ? { cache: 'no-store' } : { method, headers: body instanceof FormData ? undefined : { 'Content-Type': 'application/json' }, body: body instanceof FormData ? body : JSON.stringify(body) });
   const result = await response.json().catch(() => ({ error: '服务暂时不可用，请保留当前操作并重试。' }));
   if (!response.ok) throw new Error(result.error ?? '操作失败，请重试。');
   return result;
 }
 
-export default function Workbench() {
+export default function Workbench({ accountEmail = null }: { accountEmail?: string | null }) {
+  const { reportStorageError, clearStorageError } = useUserPreferences();
+  const profileTrigger = useRef<HTMLButtonElement>(null);
+  const pendingChat = useRef(false);
+  const reportPendingChat = useCallback((pending: boolean) => { pendingChat.current = pending; }, []);
   const [workspace, setWorkspace] = useState<Workspace>({ courses: [], materials: [], versions: [] });
   const [courseId, setCourseId] = useState(chineseDemoCourseId), [view, setView] = useState<View>('home');
   const [practiceRoute, setPracticeRoute] = useState<PracticeLocation>({ section: 'overview', activity: null });
@@ -125,7 +132,7 @@ export default function Workbench() {
   const registerPracticeBackAction=useCallback((action:PracticeBackAction|null)=>setPracticeBackAction(action),[]);
   const navigationFlush = useRef<() => Promise<boolean>>(async () => true), currentUrl = useRef('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
-  const [desktopLibrary, setDesktopLibrary] = useState(false), [readerSettingsOpen, setReaderSettingsOpen] = useState(false);
+  const [desktopLibrary, setDesktopLibrary] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false), [historyQuery, setHistoryQuery] = useState('');
   const [initialLoading, setInitialLoading] = useState(true), [error, setError] = useState(''), [toast, setToast] = useState(''), [busy, setBusy] = useState('');
   const notebook = useNotebookStore(courseId, !initialLoading);
@@ -138,7 +145,9 @@ export default function Workbench() {
   const [rangeOpen, setRangeOpen] = useState(false), [selected, setSelected] = useState<string[]>([]), [topics, setTopics] = useState<string[]>([]);
   const [conflictFeedbackOpen, setConflictFeedbackOpen] = useState(false), [conflictFeedbackReason, setConflictFeedbackReason] = useState(''), [conflictFeedbackNote, setConflictFeedbackNote] = useState('');
   const [createOpen, setCreateOpen] = useState(false), [courseName, setCourseName] = useState('');
-  const [courseShelfOpen, setCourseShelfOpen] = useState(false), [profileOpen, setProfileOpen] = useState(false);
+  const [courseShelfOpen, setCourseShelfOpen] = useState(false), [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsWorkspace, setSettingsWorkspace] = useState<Workspace | null>(null), [settingsStatsError, setSettingsStatsError] = useState('');
+  const settingsStatsRequest = useRef(0);
   const [historical, setHistorical] = useState<Version | null>(null);
   const [updateChosen, setUpdateChosen] = useState<string[]>([]);
   const [chatConversations, setChatConversations] = useState<ConversationSummary[]>([]), [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -164,6 +173,11 @@ export default function Workbench() {
     if (initialView === 'exam') { setView('practice'); window.history.replaceState(null, '', practiceLocation(params.get('course') || courseId, parsePracticeLocation(params))); }
     else if (initialView && initialView in viewNames) setView(initialView as View);
     setPracticeRoute(parsePracticeLocation(params)); setActiveConversationId(params.get('chat'));
+    if (params.get('settings') === 'profile') {
+      const url = new URL(window.location.href); url.searchParams.delete('settings');
+      window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+      openSettings();
+    }
     currentUrl.current = window.location.pathname + window.location.search;
     void reload().then(next => { const id = params.get('course'); if (id && next.courses.some(c => c.id === id)) setCourseId(id); initialized.current = true; }).catch(e => setError(e.message)).finally(() => setInitialLoading(false));
     const pop = async () => {
@@ -179,7 +193,7 @@ export default function Workbench() {
   }, [reload]);
   useEffect(() => {
     try {
-      const saved = window.localStorage.getItem(sidebarPreferenceKey);
+      const saved = workspaceLocalStorage.getItem(sidebarPreferenceKey);
       if (saved === 'true' || saved === 'false') setSidebarCollapsed(saved === 'true');
       else setSidebarCollapsed(true);
     } catch { setSidebarCollapsed(true); }
@@ -190,18 +204,17 @@ export default function Workbench() {
     update(); window.addEventListener('resize', update);
     return () => window.removeEventListener('resize', update);
   }, []);
-  useEffect(() => { setReaderSettingsOpen(false); }, [panel?.material.id, view]);
   useEffect(() => { setReviewSourceIds([]); }, [courseId]);
   useEffect(() => { if (initialized.current && view === 'home') { const params = new URLSearchParams(window.location.search); if (activeConversationId) params.set('chat', activeConversationId); else params.delete('chat'); window.history.replaceState(null, '', `?${params.toString()}`); currentUrl.current = window.location.pathname + window.location.search; } }, [activeConversationId, view]);
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 5500); return () => clearTimeout(timer); }, [toast]);
-  useEffect(() => { const handler = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('[role="dialog"]') && !document.querySelector('.sidebar-open')) { if (view === 'library' && desktopLibrary) setReaderSettingsOpen(false); else setPanel(null); } }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler); }, [view, desktopLibrary]);
+  useEffect(() => { const handler = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('[role="dialog"]') && !document.querySelector('.sidebar-open') && !(view === 'library' && desktopLibrary)) setPanel(null); }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler); }, [view, desktopLibrary]);
   useEffect(() => {
     if (!mobileMenu) return;
     const drawer = document.getElementById('shell-navigation');
     const opener = document.querySelector<HTMLButtonElement>('button[aria-label="展开课程导航"]');
     drawer?.querySelector<HTMLButtonElement>('button')?.focus();
     const handleKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || document.querySelector('[role="dialog"]')) return;
+      if (event.defaultPrevented || document.querySelector('[role="dialog"],.user-profile-menu[data-state="open"]')) return;
       if (event.key === 'Escape') { event.preventDefault(); setMobileMenu(false); opener?.focus(); }
       if (event.key !== 'Tab' || !drawer) return;
       const controls = [...drawer.querySelectorAll<HTMLElement>('button:not(:disabled),input,a[href]')].filter(element => element.getClientRects().length);
@@ -219,6 +232,15 @@ export default function Workbench() {
     if (notebook.data && !await notebook.flush()) { setError('笔记尚未保存，请重试保存后再离开。'); return false; }
     return true;
   }
+  async function login() {
+    if (pendingChat.current && !window.confirm('当前有未发送的对话、附件或尚未完成的对话。前往登录会清空这些内容，是否继续？')) return;
+    if (!await flushNavigation()) throw new Error('当前内容尚未保存，请保存后再登录。');
+    const target = new URL(window.location.href);
+    target.searchParams.set('course', courseId); target.searchParams.set('view', view);
+    if (view === 'home' && activeConversationId) target.searchParams.set('chat', activeConversationId);
+    target.searchParams.set('settings', 'profile');
+    location.assign(withBasePath(`/login?${new URLSearchParams({ next: target.pathname + target.search + target.hash })}`));
+  }
   navigationFlush.current = flushNavigation;
   async function navigate(next: View, id = courseId, newConversation = false) {
     if (!await flushNavigation()) return false;
@@ -226,7 +248,7 @@ export default function Workbench() {
     if (newConversation) { setActiveConversationId(null); setNewChatKey(current => current + 1); }
     const normalized = next === 'exam' ? 'practice' : next, route: PracticeLocation = { section: next === 'exam' ? 'papers' : 'overview', activity: null };
     const params = new URLSearchParams({ course: id, view: normalized }); if (activeConversationId && normalized === 'home' && !newConversation) params.set('chat', activeConversationId);
-    const url = normalized === 'practice' ? practiceLocation(id, route) : '/?' + params.toString();
+    const url = normalized === 'practice' ? practiceLocation(id, route) : withBasePath('/?' + params.toString());
     window.history.pushState(null, '', url); currentUrl.current = url;
     setPracticeRoute(route); setView(normalized); setCourseId(id); setPanel(null); setMobileMenu(false); setHistoryOpen(false); setUpdateChosen([]); if (main.current) main.current.scrollTop = 0; main.current?.focus({preventScroll:true});
     return true;
@@ -238,11 +260,17 @@ export default function Workbench() {
   }
   function choosePracticeSection(section: PracticeSection) { void openPracticeLocation({ section, activity: null }); }
   function toggleSidebar() {
-    setSidebarCollapsed(current => {
-      const next = !current;
-      try { window.localStorage.setItem(sidebarPreferenceKey, String(next)); } catch { /* The layout still works when browser storage is unavailable. */ }
-      return next;
-    });
+    setSidebarPreference(!sidebarCollapsed);
+  }
+  function openSettings() {
+    setSettingsOpen(true); setSettingsWorkspace(null); setSettingsStatsError('');
+    const requestId = ++settingsStatsRequest.current;
+    void api<Workspace>('/api/workspace').then(next => { if (requestId === settingsStatsRequest.current) setSettingsWorkspace(next); }).catch(() => { if (requestId === settingsStatsRequest.current) setSettingsStatsError('暂时无法读取学习概况，请重试。'); });
+  }
+  function setSidebarPreference(collapsed: boolean) {
+    setSidebarCollapsed(collapsed);
+    try { workspaceLocalStorage.setItem(sidebarPreferenceKey, String(collapsed)); clearStorageError(); return true; }
+    catch { reportStorageError(); return false; }
   }
   function openRenameConversation(conversation: ConversationSummary) {
     setConversationTitle(conversation.title);
@@ -268,7 +296,7 @@ export default function Workbench() {
       return;
     }
     await run('删除对话', async () => {
-      const response = await fetch(`/api/chat?courseId=${encodeURIComponent(courseId)}&conversationId=${encodeURIComponent(conversation.id)}`, { method: 'DELETE' });
+      const response = await workspaceFetch(`/api/chat?courseId=${encodeURIComponent(courseId)}&conversationId=${encodeURIComponent(conversation.id)}`, { method: 'DELETE' });
       const result = await response.json().catch(() => ({ error: '对话删除失败，请重试。' }));
       if (!response.ok) throw new Error(result.error ?? '对话删除失败，请重试。');
       setChatConversations(result.conversations);
@@ -392,15 +420,14 @@ export default function Workbench() {
     <a className="skip-link" href="#main">跳到主要内容</a>
     {mobileMenu && <button className="nav-backdrop" aria-label="关闭课程导航" onClick={() => setMobileMenu(false)} />}
     <aside id="shell-navigation" aria-label="学习导航" className={`sidebar ${mobileMenu ? 'sidebar-open' : ''}`}>
-      <div className="brand" title="百知册 · 把零散资料，学成完整知识。"><span className="brand-mark" aria-hidden="true"><img className="brand-logo" src="/brand/baizhice-symbol-blue.png" alt="" width={42} height={42}/></span><div><b>百知册</b><span>把零散资料，学成完整知识。</span></div></div>
+      <div className="brand" title="百知册 · 把零散资料，学成完整知识。"><span className="brand-mark" aria-hidden="true"><img className="brand-logo" src={withBasePath("/brand/baizhice-symbol-blue.png")} alt="" width={42} height={42}/></span><div><b>百知册</b><span>把零散资料，学成完整知识。</span></div></div>
       <p className="nav-label">AI 学习</p>
       <nav aria-label="AI 学习"><button className={`nav-item ${view==='home'?'active':''}`} aria-label="新对话" title="新对话" onClick={() => navigate('home', courseId, true)} aria-current={view==='home'?'page':undefined}><LayoutDashboard size={16}/><span>新对话</span></button></nav>
       <p className="nav-label content-nav-label">学习内容</p>
       <nav aria-label="学习内容">{([['analytics',TrendingUp],['library',FolderOpen],['outline',BookOpen],['practice',ListChecks]] as const).map(([id,Icon]) => <button key={id} className={`nav-item ${view===id?'active':''}`} aria-label={viewNames[id]} title={viewNames[id]} onClick={() => navigate(id)} aria-current={view===id?'page':undefined}><Icon size={16}/><span>{viewNames[id]}</span>{id==='library' && materials.length>0 && <small>{materials.length}</small>}</button>)}</nav>
       <div className="sidebar-course"><button className="course-select-trigger" type="button" aria-label="展开课程书架" title={course?.name ?? '切换课程'} aria-haspopup="dialog" aria-expanded={courseShelfOpen} onClick={() => setCourseShelfOpen(true)} disabled={!!busy}><BookOpen size={16}/><span>{course?.name ?? '选择一门课程'}</span><ChevronDown size={14}/></button><Button className="sidebar-add-course" size="icon" variant="ghost" aria-label="添加课程" title="添加课程" onClick={() => setCreateOpen(true)}><Plus size={15}/></Button></div>
-      <ThemeToggle/>
       <Button className="sidebar-toggle" variant="ghost" aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} onClick={toggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen size={17}/> : <PanelLeftClose size={17}/>}<span>{sidebarCollapsed ? '展开侧栏' : '收起侧栏'}</span></Button>
-      <button className="profile" type="button" title="我的学习空间" onClick={() => setProfileOpen(true)} aria-label="打开我的学习空间"><span>我</span><div><b>我的学习空间</b><small>查看学习概况</small></div><ShieldCheck size={17}/></button>
+      <ProfileMenu triggerRef={profileTrigger} onSettings={openSettings}/>
     </aside>
     <div className="workspace">
       <header className="topbar"><Button variant="ghost" size="icon" className="mobile-menu" aria-label="展开课程导航" aria-expanded={mobileMenu} aria-controls="shell-navigation" onClick={() => setMobileMenu(true)}><Menu size={18}/></Button><h1 title={readerTitle}>{readerTitle}</h1><div className="shell-reader-actions"><span title={course?.name}>{course?.name}</span><Button variant="ghost" size="icon" aria-label="切换课程" title="切换课程" onClick={() => setCourseShelfOpen(true)}><BookOpen size={15}/></Button><Button variant="ghost" size="icon" aria-label="上传学习资料" title="上传资料" onClick={() => openUpload('files')}><Upload size={15}/></Button>{view === 'library' && panel && <Button variant="ghost" size="icon" aria-label="关闭原文面板" title="关闭资料" onClick={() => setPanel(null)}><X size={16}/></Button>}</div></header>
@@ -408,7 +435,7 @@ export default function Workbench() {
       <main id="main" ref={main} tabIndex={-1} className={`content-view view-${view}`}>
         {error && <div className="error-banner" role="alert"><CircleAlert size={18}/><span>{error}</span><Button size="sm" variant="ghost" onClick={() => void run('刷新数据',async()=>{await reload();})}>刷新数据</Button><Button size="icon" variant="ghost" aria-label="关闭错误提示" onClick={()=>setError('')}><X size={16}/></Button></div>}
         {initialLoading ? <div className="workspace-loading"><LoaderCircle className="spin" size={27}/><p>正在打开你的学习空间</p></div> : <>
-        {view === 'home' && <LearningHome key={`${courseId}-${newChatKey}`} courseId={courseId} initialConversationId={activeConversationId} conversations={chatConversations} onConversationsChange={setChatConversations} onSelectConversation={setActiveConversationId} historyOpen={historyOpen} onOpenHistory={() => { setHistoryQuery(''); setHistoryOpen(true); }}/>}
+        {view === 'home' && <LearningHome key={`${courseId}-${newChatKey}`} courseId={courseId} initialConversationId={activeConversationId} conversations={chatConversations} onConversationsChange={setChatConversations} onSelectConversation={setActiveConversationId} historyOpen={historyOpen} onPendingChange={reportPendingChat} onOpenHistory={() => { setHistoryQuery(''); setHistoryOpen(true); }}/>}
         {view === 'analytics' && <LearningAnalytics key={courseId} courseId={courseId} onOpenPractice={route => void openPracticeLocation(route)} onLibrary={() => void navigate('library')} onOutline={() => void navigate('outline')} onVersions={() => void navigate('versions')}/>}
         {view === 'practice' && <PracticeStudyProvider key={courseId} courseId={courseId}><div className={`practice-center ${practiceSection === 'overview' ? 'practice-center-overview' : 'practice-center-subpage'}`}>
           {practiceSection === 'overview' ? <>
@@ -472,15 +499,14 @@ export default function Workbench() {
         <div className="inspector-header">{view === 'library' && desktopLibrary ? <>
           <h2 id="library-reader-title" title={panel.material.name}>{panel.material.name}</h2>
           <div className="library-reader-actions">
-            <a href={`/api/files/${panel.material.id}`} target="_blank" rel="noreferrer" aria-label="打开原文件" title="打开原文件"><ExternalLink size={19}/></a>
-            <a href={`/api/files/${panel.material.id}`} download={panel.material.name} aria-label="下载原文件" title="下载原文件"><ArrowDownToLine size={19}/></a>
+            <a href={withBasePath(`/api/files/${panel.material.id}`)} target="_blank" rel="noreferrer" aria-label="打开原文件" title="打开原文件"><ExternalLink size={19}/></a>
+            <a href={withBasePath(`/api/files/${panel.material.id}`)} download={panel.material.name} aria-label="下载原文件" title="下载原文件"><ArrowDownToLine size={19}/></a>
             <Button variant="ghost" size="icon" aria-label="删除当前资料" title="删除资料" disabled={!!busy} onClick={() => { setError(''); setMaterialToDelete(panel.material); }}><Trash2 size={19}/></Button>
-            <Button variant="ghost" size="icon" aria-label="资料设置" title="资料设置" aria-expanded={readerSettingsOpen} aria-controls="library-reader-settings" onClick={() => setReaderSettingsOpen(current => !current)}><MoreHorizontal size={19}/></Button>
           </div>
         </> : <><span><FileText size={17}/>{panel.reference ? '原文对照' : '资料详情'}</span><Button variant="ghost" size="icon" aria-label="关闭原文面板" onClick={() => setPanel(null)}><X size={18}/></Button></>}</div>
-        <div className={`inspector-content ${view === 'library' && desktopLibrary ? 'material-reader-content' : ''}`}><div id={view === 'library' && desktopLibrary ? 'library-reader-settings' : undefined} className={view === 'library' && desktopLibrary ? 'library-reader-settings' : undefined} hidden={view === 'practice' && !!panel.reference || view === 'library' && desktopLibrary && !readerSettingsOpen}>{view === 'library' && desktopLibrary ? <div className="library-reader-metadata"><div><strong>{panel.material.chapter || '未分类'}</strong><span>{documentLabel(panel.material.mime)} · {sizeLabel(panel.material.size)} · {status(panel.material)}</span><p className="source-origin">{panel.material.origin.startsWith('高考真题 · 来源：') ? <a href={panel.material.origin.slice('高考真题 · 来源：'.length)} target="_blank" rel="noreferrer">高考真题 · 查看原始来源</a> : panel.material.origin}</p></div><time dateTime={panel.material.createdAt}>{dateLabel(panel.material.createdAt)}</time></div> : <><div className="inspector-title"><span className={`file-icon ${panel.material.status === 'review' ? 'file-note' : ''}`}><FileText size={22}/><small>{documentLabel(panel.material.mime)}</small></span><div><h2>{panel.material.name}</h2><p>{sizeLabel(panel.material.size)} · {status(panel.material)}</p></div></div><p className="source-origin">{panel.material.origin.startsWith('高考真题 · 来源：') ? <a href={panel.material.origin.slice('高考真题 · 来源：'.length)} target="_blank" rel="noreferrer">查看原始来源</a> : panel.material.origin}</p></>}
+        <div className={`inspector-content ${view === 'library' && desktopLibrary ? 'material-reader-content' : ''}`}><div id={view === 'library' && desktopLibrary ? 'library-reader-settings' : undefined} className={view === 'library' && desktopLibrary ? 'library-reader-settings' : undefined} hidden={view === 'practice' && !!panel.reference || view === 'library' && desktopLibrary}>{view === 'library' && desktopLibrary ? <div className="library-reader-metadata"><div><strong>{panel.material.chapter || '未分类'}</strong><span>{documentLabel(panel.material.mime)} · {sizeLabel(panel.material.size)} · {status(panel.material)}</span><p className="source-origin">{panel.material.origin.startsWith('高考真题 · 来源：') ? <a href={panel.material.origin.slice('高考真题 · 来源：'.length)} target="_blank" rel="noreferrer">高考真题 · 查看原始来源</a> : panel.material.origin}</p></div><time dateTime={panel.material.createdAt}>{dateLabel(panel.material.createdAt)}</time></div> : <><div className="inspector-title"><span className={`file-icon ${panel.material.status === 'review' ? 'file-note' : ''}`}><FileText size={22}/><small>{documentLabel(panel.material.mime)}</small></span><div><h2>{panel.material.name}</h2><p>{sizeLabel(panel.material.size)} · {status(panel.material)}</p></div></div><p className="source-origin">{panel.material.origin.startsWith('高考真题 · 来源：') ? <a href={panel.material.origin.slice('高考真题 · 来源：'.length)} target="_blank" rel="noreferrer">查看原始来源</a> : panel.material.origin}</p></>}
         {panel.material.name===chineseExamInfo['2023-new-i'].name&&<p className="exam-source-note">这份网络整理版把现代文阅读总分误排为 36 分；各题分值合计为 35 分。文件不含参考答案。</p>}{panel.material.name===chineseExamInfo['2024-new-ii'].name&&<p className="exam-source-note">这份试卷文件只含题目，不含参考答案。</p>}{examGuideCard}
-        {panel.reference && <div className="reference-context"><span><BookOpen size={13}/>本段引用依据 · {sourceLocation(panel.reference.name,panel.reference.page)}</span><p>{panel.reference.snippet}</p><small>生成内容可能引用核对后文字，请同时对照原文件。</small></div>}
+        {panel.reference && <div className="reference-context"><span><BookOpen size={13}/>原文对照 · {panel.reference.location==='paragraph'?'选中的原文':sourceLocation(panel.reference.name,panel.reference.page)}</span><p>{panel.reference.anchor?.quote??panel.reference.snippet}</p><small>生成内容可能引用核对后文字，请同时对照原文件。</small></div>}
         {panel.material.status==='review' && !panel.material.conflictResolution && <div className="inspector-issue"><span className="issue-label"><CircleAlert size={15}/>发现一处内容冲突</span><h3>{'互斥是否意味着独立？'}</h3><div className="conflict-quote"><small>你的笔记</small><p>{'“只要两个事件互斥，它们就一定相互独立。”'}</p></div><div className="conflict-reference"><small>参考资料</small><p>{'两个事件的概率都大于零时，互斥事件不独立。'}</p><button onClick={()=>{const m=materials.find(m=>m.fixture===('independence'));if(m)setPanel({material:m});else setToast('请先导入独立性参考讲义。');}}>{'查看独立性参考讲义'}<ArrowRight size={13}/></button></div><p className="muted small">采纳后，后续提纲和练习使用参考结论；你的原始笔记保持不变。</p><div className="conflict-actions"><Button disabled={!!busy} onClick={()=>void resolveConflict(panel.material,'accept-reference')}>采纳参考结论</Button><Button variant="secondary" disabled={!!busy} onClick={()=>setConflictFeedbackOpen(true)}>暂不采纳</Button></div>{conflictFeedbackOpen && <div className="conflict-feedback"><b>为什么暂不采纳？</b><div className="conflict-reasons">{conflictReasons.map(([value,label])=><label key={value}><input type="radio" name="conflict-reason" value={value} checked={conflictFeedbackReason===value} onChange={()=>setConflictFeedbackReason(value)}/><span>{label}</span></label>)}</div><label className="conflict-note">补充说明（选填）<textarea maxLength={500} value={conflictFeedbackNote} onChange={event=>setConflictFeedbackNote(event.target.value)} /></label><p>提交后，这份冲突资料将暂停用于生成提纲和练习；其他无冲突资料不受影响。完成核对后可随时恢复。</p><Button disabled={!conflictFeedbackReason||!!busy} onClick={()=>void resolveConflict(panel.material,'pause-conflict')}>提交反馈并暂停使用</Button></div>}</div>}
         {panel.material.conflictResolution==='paused' && <div className="inspector-issue conflict-result"><span className="issue-label"><CircleAlert size={15}/>因内容冲突已暂停</span><h3>这份资料暂不参与生成</h3><p>暂停原因：{conflictReasonLabel(panel.material.conflictFeedbackReason)}</p>{panel.material.conflictFeedbackNote&&<p className="conflict-result-note">{panel.material.conflictFeedbackNote}</p>}<p className="muted small">提纲和练习会继续使用其他无冲突资料。原始笔记未删除或改写。</p><Button variant="secondary" disabled={!!busy} onClick={()=>void resolveConflict(panel.material,'reopen-conflict')}>重新核对</Button></div>}
         {panel.material.conflictResolution==='accepted_reference' && <div className="inspector-issue conflict-result conflict-accepted"><span className="issue-label"><Check size={15}/>已采纳参考结论</span><h3>后续复习将使用参考资料</h3><p>后续复习内容将采用参考结论，原始笔记未修改。</p><Button variant="secondary" disabled={!!busy} onClick={()=>void resolveConflict(panel.material,'reopen-conflict')}>重新核对</Button></div>}
@@ -488,8 +514,8 @@ export default function Workbench() {
         {!panel.material.fixture && <div className="stored-note"><CircleAlert size={16}/><p>文件保存在当前学习空间。提取后可在复习材料中核对原页文字，再选择发送给 AI 助手 整理。</p></div>}
         <div className="source-controls"><ChapterField key={panel.material.id+'-'+panel.material.chapter} chapter={panel.material.chapter} chapters={materials.map(m=>m.chapter)} disabled={!!busy} onSave={chapter=>run('保存章节',async()=>{const m=await api<Material>(`/api/materials/${panel.material.id}`,{chapter},'PATCH');await reload();setPanel(p=>p?{...p,material:m}:p);setToast('章节归属已保存。');})}/>{panel.material.status!=='review' && <Button variant="ghost" size="sm" disabled={!!busy} onClick={()=>void toggleExclude(panel.material)}>{panel.material.excluded?'恢复纳入范围':'从生成范围排除'}</Button>}</div>
         </div>
-        </div>{view === 'library' && desktopLibrary ? <MaterialStudyReader key={courseId} courseId={courseId} material={panel.material} materials={materials} reference={panel.reference} initialPage={panel.reference?.location==='paragraph'||panel.reference?.location==='image'?1:panel.reference?.page??panel.previewPage??1} notebook={notebook} onReference={openReference} onReload={reload} onNotebook={pageId=>{try{localStorage.setItem(`lms.notebook.position.${courseId}`,`${pageId}:0`);}catch{/* Default reading location is still usable. */}navigate('outline');}} onPractice={(materialId,section='knowledge')=>{void openPracticeLocation({section,activity:section==='mistakes'?'mistakes':'sources',materialId});}}/> : view === 'practice' && panel.reference ? <div className="practice-source-preview"><h2>{panel.material.name}</h2><div className="preview-caption"><span>原始文件 · {sourceLocation(panel.reference.name,panel.reference.page)}</span><a href={`/api/files/${panel.material.id}`} target="_blank" rel="noreferrer"><ExternalLink size={13}/>打开原文件</a></div><OriginalFilePreview key={`${panel.material.id}:${panel.reference.page}:${panel.reference.snippet}`} material={panel.material} initialPage={panel.reference.location==='paragraph'||panel.reference.location==='image'?1:panel.reference.page} studyAnnotations={{mode:'browse',focusAnchor:{kind:panel.reference.location==='image'?'region':'text',page:panel.reference.location==='paragraph'||panel.reference.location==='image'?undefined:panel.reference.page,displayPage:panel.reference.anchor?.displayPage,quote:panel.reference.anchor?.quote??panel.reference.snippet,prefix:panel.reference.anchor?.prefix??'',suffix:panel.reference.anchor?.suffix??'',rects:panel.reference.anchor?.rects??[]}}}/></div> : <><ExtractedContent key={panel.material.id} readingMode={view === 'library' && desktopLibrary} material={panel.material} initialPage={panel.reference?.page??panel.previewPage??1} onComplete={async()=>{const next=await reload();setPanel(p=>p?{...p,material:next.materials.find(m=>m.id===p.material.id)??p.material}:p);}} onViewPage={page=>{setPanel(p=>p?{...p,previewPage:page,reference:undefined}:p);requestAnimationFrame(()=>document.querySelector('.inspector .preview-caption')?.scrollIntoView({behavior:'smooth',block:'start'}));}}/>
-        <div className="preview-caption"><span>原始文件</span><a href={`/api/files/${panel.material.id}`} target="_blank" rel="noreferrer"><ArrowDownToLine size={13}/>打开原文件</a></div>{panel.material.mime==='application/pdf' ? <PdfPreview key={`${panel.material.id}-${panel.reference?.page??panel.previewPage??1}`} name={panel.material.name} url={`/api/files/${panel.material.id}`} initialPage={panel.reference?.page??panel.previewPage??1} landmarks={panelGuide?.landmarks}/> : panel.material.mime.startsWith('image/') ? <div className="image-preview"><img src={`/api/files/${panel.material.id}`} alt={panel.material.name} onError={e=>{e.currentTarget.alt='图片无法显示，请打开原文件检查。';}}/></div> : <p className="stored-note">上方显示按原始顺序提取的文字。Office 排版、图片和复杂公式请下载原文件对照；Word 与 TXT 的段号不代表打印页码。</p>}
+        </div>{view === 'library' && desktopLibrary ? <MaterialStudyReader key={courseId} courseId={courseId} material={panel.material} materials={materials} reference={panel.reference} initialPage={panel.reference?.location==='paragraph'||panel.reference?.location==='image'?1:panel.reference?.page??panel.previewPage??1} notebook={notebook} onReference={openReference} onReload={reload} onNotebook={pageId=>{try{workspaceLocalStorage.setItem(`lms.notebook.position.${courseId}`,`${pageId}:0`);}catch{/* Default reading location is still usable. */}navigate('outline');}} onPractice={(materialId,section='knowledge')=>{void openPracticeLocation({section,activity:section==='mistakes'?'mistakes':'sources',materialId});}}/> : view === 'practice' && panel.reference ? <div className="practice-source-preview"><h2>{panel.material.name}</h2><div className="preview-caption"><span>原始文件 · {sourceLocation(panel.reference.name,panel.reference.page)}</span><a href={withBasePath(`/api/files/${panel.material.id}`)} target="_blank" rel="noreferrer"><ExternalLink size={13}/>打开原文件</a></div><OriginalFilePreview key={`${panel.material.id}:${panel.reference.page}:${panel.reference.snippet}`} material={panel.material} initialPage={panel.reference.location==='paragraph'||panel.reference.location==='image'?1:panel.reference.page} studyAnnotations={{mode:'browse',focusAnchor:{kind:panel.reference.location==='image'?'region':'text',page:panel.reference.location==='paragraph'||panel.reference.location==='image'?undefined:panel.reference.page,displayPage:panel.reference.anchor?.displayPage,quote:panel.reference.anchor?.quote??panel.reference.snippet,prefix:panel.reference.anchor?.prefix??'',suffix:panel.reference.anchor?.suffix??'',rects:panel.reference.anchor?.rects??[]}}}/></div> : <><ExtractedContent key={panel.material.id} readingMode={view === 'library' && desktopLibrary} material={panel.material} initialPage={panel.reference?.page??panel.previewPage??1} onComplete={async()=>{const next=await reload();setPanel(p=>p?{...p,material:next.materials.find(m=>m.id===p.material.id)??p.material}:p);}} onViewPage={page=>{setPanel(p=>p?{...p,previewPage:page,reference:undefined}:p);requestAnimationFrame(()=>document.querySelector('.inspector .preview-caption')?.scrollIntoView({behavior:'smooth',block:'start'}));}}/>
+        <div className="preview-caption"><span>原始文件</span><a href={withBasePath(`/api/files/${panel.material.id}`)} target="_blank" rel="noreferrer"><ArrowDownToLine size={13}/>打开原文件</a></div>{panel.material.mime==='application/pdf' ? <PdfPreview key={`${panel.material.id}-${panel.reference?.page??panel.previewPage??1}`} name={panel.material.name} url={withBasePath(`/api/files/${panel.material.id}`)} initialPage={panel.reference?.page??panel.previewPage??1} landmarks={panelGuide?.landmarks}/> : panel.material.mime.startsWith('image/') ? <div className="image-preview"><img src={withBasePath(`/api/files/${panel.material.id}`)} alt={panel.material.name} onError={e=>{e.currentTarget.alt='图片无法显示，请打开原文件检查。';}}/></div> : <p className="stored-note">上方显示按原始顺序提取的文字。Office 排版、图片和复杂公式请下载原文件对照；Word 与 TXT 的段号不代表打印页码。</p>}
         <p className="preview-footnote">原文件与导入记录保留。演示结果不代表实际模型识别质量。</p></>}
       </div></aside>}
       </div>
@@ -503,7 +529,7 @@ export default function Workbench() {
         {importResults.length>0 && <div className="inbox-results" aria-live="polite">{importResults.map((result,index)=><div key={`${result.name}-${index}`}><Check size={14}/><span>{result.name}：{result.message}</span></div>)}</div>}
         <div className="info-strip"><ShieldCheck size={15}/><span>QQ、网盘文件下载后可批量拖入；旧版 .doc / .ppt 请另存为 DOCX / PPTX 或 PDF。待确认文件保存在你的学习空间，确认课程后才加入资料库并提取文字。</span></div><div className="modal-footer"><Button onClick={()=>{setJobs([]);setUploadOpen(false);navigate('home');}} disabled={!!busy}>稍后处理</Button><Button variant="primary" disabled={!!busy || !inbox.length || inbox.some(item=>!item.courseId)} onClick={()=>void uploadFiles()}>{busy==='导入资料'?<LoaderCircle size={16} className="spin"/>:<Upload size={16}/>}确认归属并导入</Button></div></> : <>
         <div className="sample-intro"><span className="sample-icon"><BookOpen size={23}/></span><div><h3>{mathDemo?'概率论 · 期末复习体验包':'高中语文 · 高考真题资料'}</h3><p>{mathDemo?'4 份简短中文 PDF，用于体验演示流程。':'2023、2024 年全国新课标卷。打开整卷后可按阅读、语言运用、写作等部分选择。'}</p></div></div>
-        <div className="sample-list">{mathDemo ? mathSampleKeys.map(key=><div key={key}><FileText size={18}/><div><b>{sampleInfo[key].name}</b><small>{key==='note'?'故意包含错误，用于演示冲突处理':key==='exercises'?'后续补充，用于演示增量更新':'自编演示资料'}</small></div><a href={`/api/samples/${key}`} aria-label={`下载${sampleInfo[key].name}`}><ArrowDownToLine size={17}/></a></div>) : Object.entries(chineseExamInfo).map(([key,info])=><div key={key}><FileText size={18}/><div><b>{info.name}</b><small>{info.chapter} · <a href={info.source} target="_blank" rel="noreferrer">查看原始来源</a></small></div></div>)}</div>
+        <div className="sample-list">{mathDemo ? mathSampleKeys.map(key=><div key={key}><FileText size={18}/><div><b>{sampleInfo[key].name}</b><small>{key==='note'?'故意包含错误，用于演示冲突处理':key==='exercises'?'后续补充，用于演示增量更新':'自编演示资料'}</small></div><a href={withBasePath(`/api/samples/${key}`)} aria-label={`下载${sampleInfo[key].name}`}><ArrowDownToLine size={17}/></a></div>) : Object.entries(chineseExamInfo).map(([key,info])=><div key={key}><FileText size={18}/><div><b>{info.name}</b><small>{info.chapter} · <a href={info.source} target="_blank" rel="noreferrer">查看原始来源</a></small></div></div>)}</div>
         <div className="info-strip"><CircleAlert size={15}/><span>{mathDemo?'先导入基础资料，再补充练习。':'同一套试卷只导入一份；2024 年Ⅰ卷附参考答案，2023 年Ⅰ卷和 2024 年Ⅱ卷只有试题。'}</span></div>
         <div className="modal-footer">{mathDemo&&<Button disabled={!!busy} onClick={()=>void importSamples('supplement')}>仅补充练习</Button>}<Button variant="primary" disabled={!!busy} onClick={()=>void importSamples('core')}>{busy?<LoaderCircle className="spin" size={16}/>:<Plus size={16}/>}导入{mathDemo?'基础演示资料':'整套试卷'}</Button></div>
       </>}
@@ -523,9 +549,7 @@ export default function Workbench() {
       <div className="course-shelf-grid">{workspace.courses.map(item => { const itemMaterials = workspace.materials.filter(material => material.courseId === item.id).length; const itemVersions = workspace.versions.filter(version => version.courseId === item.id).length; return <button type="button" key={item.id} className={`course-book ${item.id===courseId?'selected':''}`} onClick={()=>{navigate('home',item.id);setCourseShelfOpen(false);}}><CourseCover title={item.name} seed={item.id}/><span className="course-book-title">{item.name}</span><small>{itemMaterials} 份资料 · {itemVersions} 个版本</small>{item.id===courseId&&<em>当前课程</em>}</button>; })}<button type="button" className="course-book course-book-add" onClick={()=>{setCourseShelfOpen(false);setCreateOpen(true);}}><span className="course-book-add-icon"><Plus size={24}/></span><b>添加新课程</b><small>输入课程名，生成新的学习空间</small></button></div>
       <div className="course-shelf-note"><BookOpen size={15}/><span>每门课程都有独立的资料、对话、复习材料和版本记录。</span></div>
     </Modal>
-    <Modal open={profileOpen} onOpenChange={setProfileOpen} title="我的学习空间" description="当前课程的学习概况与私人空间说明。">
-      <div className="profile-summary"><span className="profile-summary-avatar">我</span><div><b>私人学习者</b><span>{course?.name ?? '尚未选择课程'}</span></div></div><div className="profile-stats"><div><b>{materials.length}</b><span>份课程资料</span></div><div><b>{chatConversations.length}</b><span>段对话记录</span></div><div><b>{versions.length}</b><span>个复习版本</span></div></div><div className="profile-privacy"><ShieldCheck size={17}/><div><b>资料保存在你的学习空间</b><p>上传的文件、对话历史和复习版本不会自动公开。发送给 AI 前，系统会在操作处明确提示。</p></div></div><div className="modal-footer"><span className="muted small">当前课程：{course?.name ?? '未选择'}</span>{workspace.privateCloud && <Button onClick={async () => { await notebook.flush('退出前保存'); const response = await fetch('/api/auth/sign-out', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); if (response.ok) location.href = '/login'; else setError('退出暂未完成，请重试。'); }}>退出登录</Button>}<Button onClick={()=>setProfileOpen(false)}>完成</Button></div>
-    </Modal>
+    {settingsOpen && <SettingsPanel onLogin={login} onClose={() => setSettingsOpen(false)} triggerRef={profileTrigger} courseName={course?.name ?? '尚未选择课程'} counts={{ materials: settingsWorkspace ? settingsWorkspace.materials.filter(material => material.courseId === courseId).length : null, conversations: settingsWorkspace?.courses.find(item => item.id === courseId)?.conversationCount ?? null, versions: settingsWorkspace ? settingsWorkspace.versions.filter(version => version.courseId === courseId).length : null }} statisticsLoading={!settingsWorkspace && !settingsStatsError} statisticsError={settingsStatsError} onRetryStatistics={openSettings} sidebarCollapsed={sidebarCollapsed} onSidebarChange={setSidebarPreference} accountEmail={accountEmail} privateCloud={!!workspace.privateCloud} onSignOut={async () => { if (!await notebook.flush('退出前保存')) throw new Error('笔记尚未保存，请重试保存后再退出。'); const response = await fetch(withBasePath('/api/auth/sign-out'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); if (!response.ok) throw new Error('退出暂未完成，请重试。'); notifyAuthChanged(); location.href = withBasePath('/login'); }}/ >}
     <Modal error={error} open={createOpen} onOpenChange={setCreateOpen} title="添加一本课程书" description="输入书名即可创建独立的资料、对话和复习空间。"><form onSubmit={e=>{e.preventDefault();void run('添加课程',async()=>{const c=await api<Course>('/api/workspace',{action:'create-course',name:courseName});await reload();setCreateOpen(false);setCourseName('');navigate('home',c.id);});}}><label className="form-field">书名 / 课程名称<input autoFocus value={courseName} onChange={e=>setCourseName(e.target.value)} placeholder="例如：高等数学 · 期末复习" maxLength={60} required/></label><p className="form-helper">这个名称会显示在书架封面上；以后可以再接入 AI 根据资料自动建议书名。</p><div className="modal-footer"><Button onClick={()=>setCreateOpen(false)}>取消</Button><Button variant="primary" type="submit" disabled={!!busy || !courseName.trim()}>创建学习空间</Button></div></form></Modal>
     <Modal open={!!historical} onOpenChange={v=>{if(!v)setHistorical(null);}} title={`复习提纲 · 版本 ${historical?.number??''}`} description="历史快照只读，查看不会修改当前版本。" wide>{historical && <><div className="history-meta">{dateLabel(historical.createdAt)} · {aiAssistantText(historical.summary)}</div><div className="history-content">{historical.sections.map(s=><section key={s.id}><h3>{s.title}</h3>{s.generation&&<p className="citation-notice">{contentOriginLabel(s.generation)}{s.edited&&' · 个人修订'}</p>}<Markdown text={s.body}/>{s.needsReview&&<p className="citation-notice">本版本中，该段引用尚待用户重新核对。</p>}{s.generation?.contentOrigin==='ai-supplement'&&<p className="citation-notice">{referenceOriginLabel(s.generation)}</p>}<div className="citations">{s.refs.map(r=><button key={r.materialId} onClick={()=>openReference(r)}><FileText size={13}/>{r.name} · {sourceLocation(r.name,r.page)}</button>)}</div></section>)}</div><div className="modal-footer"><span className="muted small">原有版本始终保留。</span><Button onClick={()=>exportOutline(historical)}><ArrowDownToLine size={16}/>导出此版本</Button></div></>}</Modal>
     <Modal error={error} open={!!materialToDelete} onOpenChange={value=>{if(!value&&!busy)setMaterialToDelete(null);}} title="删除资料" description="请确认要删除的资料。">

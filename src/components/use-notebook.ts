@@ -1,4 +1,5 @@
 'use client';
+import { workspaceFetch } from '@/lib/workspace-storage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NotebookData, NotebookDocument } from '@/lib/notebook';
 import { equalContent } from '@/lib/notebook';
@@ -21,7 +22,7 @@ export async function notebookDraft(action: 'read' | 'write' | 'delete', courseI
   });
 }
 async function readNotebook(courseId: string): Promise<NotebookData> {
-  const response = await fetch(`/api/notebooks/${encodeURIComponent(courseId)}`, { cache: 'no-store' });
+  const response = await workspaceFetch(`/api/notebooks/${encodeURIComponent(courseId)}`, { cache: 'no-store' });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error ?? '暂时无法读取笔记。');
   return data;
@@ -49,7 +50,7 @@ export function useNotebookStore(courseId: string, enabled: boolean) {
     try {
       if (!dirty.current && !pending.current) {
         if (checkpoint.current) {
-          const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'checkpoint', summary: checkpoint.current }) });
+          const response = await workspaceFetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'checkpoint', summary: checkpoint.current }) });
           if (!response.ok) throw new Error('版本暂未保存，请重试。');
           checkpoint.current = undefined;
         }
@@ -67,7 +68,7 @@ export function useNotebookStore(courseId: string, enabled: boolean) {
         await retainDraft({ data: current.current!, mutation });
       }
       setStatus('正在保存');
-      const response = await fetch(endpoint, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(mutation) });
+      const response = await workspaceFetch(endpoint, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(mutation) });
       const result = await response.json();
       if (turn !== epoch.current) return false;
       if (response.status === 409 && result.current) {

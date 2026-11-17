@@ -1,3 +1,4 @@
+import { withWorkspace } from '@/lib/workspace-scope';
 import { requirePrivateAccess } from '@/lib/private-access';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -13,7 +14,7 @@ const schema = z.discriminatedUnion('action', [
   z.object({ ...base, action: z.literal('update'), chosenIds: z.array(z.string()).min(1).max(20) }),
   z.object({ ...base, action: z.literal('confirm-refs'), sectionId: z.string() }),
 ]);
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -50,3 +51,5 @@ export async function POST(request: Request) {
     return NextResponse.json(publicVersion(saved));
   } catch (error) { return errorResponse(error); }
 }
+
+export const POST = withWorkspace(handlePOST);

@@ -1,3 +1,4 @@
+import { withWorkspace } from '@/lib/workspace-scope';
 import { requirePrivateAccess } from '@/lib/private-access';
 import { z } from 'zod';
 import { db } from '@/lib/db';
@@ -7,7 +8,7 @@ import { checkpointNotebook, getNotebook, NotebookConflict, notebookSchema, save
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ courseId: string }> };
-export async function GET(request: Request, context: Context) {
+async function handleGET(request: Request, context: Context) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     const { courseId } = await context.params;
@@ -19,7 +20,7 @@ export async function GET(request: Request, context: Context) {
   } catch (error) { return errorResponse(error); }
 }
 const schema = z.object({ revision: z.number().int().positive(), requestId: z.string().uuid(), document: notebookSchema, checkpoint: z.string().min(1).max(120).optional() });
-export async function PATCH(request: Request, context: Context) {
+async function handlePATCH(request: Request, context: Context) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -31,7 +32,7 @@ export async function PATCH(request: Request, context: Context) {
     return errorResponse(error);
   }
 }
-export async function POST(request: Request, context: Context) {
+async function handlePOST(request: Request, context: Context) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -47,3 +48,7 @@ export async function POST(request: Request, context: Context) {
     return errorResponse(error);
   }
 }
+
+export const GET = withWorkspace(handleGET);
+export const PATCH = withWorkspace(handlePATCH);
+export const POST = withWorkspace(handlePOST);

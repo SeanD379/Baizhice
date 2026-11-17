@@ -4,11 +4,11 @@ import path from 'node:path';
 vi.mock('./db', async () => {
   const {PrismaClient}=await import('@prisma/client'),fs=await import('node:fs/promises'),path=await import('node:path');
   await fs.mkdir('tmp',{recursive:true});const dataDir=await fs.mkdtemp(path.resolve('tmp/material-study-'));
-  return {dataDir,db:new PrismaClient({datasources:{db:{url:`file:${path.join(dataDir,'test.db').replaceAll('\\','/')}`}}})};
+  return {dataDir,getDataDir:()=>dataDir,db:new PrismaClient({datasources:{db:{url:`file:${path.join(dataDir,'test.db').replaceAll('\\','/')}`}}})};
 });
-vi.mock('./deepseek',()=>({deepSeekConfig:()=>({configured:true,model:'test'}),generateWithDeepSeek:vi.fn()}));
+vi.mock('./deepseek',()=>({deepSeekConfig:()=>({configured:true,model:'test'}),generateWithDeepSeek:vi.fn(),requestStructuredOutput:vi.fn()}));
 import { db, dataDir } from './db';
-import { generateWithDeepSeek } from './deepseek';
+import { generateWithDeepSeek, requestStructuredOutput } from './deepseek';
 import { saveMaterialAnnotation, selectedReferences, listMaterialAnnotations, readAnnotationImage, deleteMaterialAnnotation } from './material-annotation-store';
 import { organizeMaterial, getMaterialStudyTask, listMaterialStudyTasks, reviseMaterialStudy, adoptMaterialStudy } from './material-study-store';
 import { annotationAnchorSchema, knowledgeBatches, mergeStudyCandidates, validateSupplementOutput } from './material-study';
@@ -52,6 +52,8 @@ it.each(['notebook','mistakes','papers'] as const)('persists and adopts a review
   vi.mocked(generateWithDeepSeek).mockImplementation(async(_pages,_annotations,_preset,questions=[])=>({model:'test',output:{sections:[],questionIds:questions.map(question=>question.id),warnings:[]}}));
   const task=await finished(await organizeMaterial({courseId:'c',mode:'material',routing:'auto',materialIds:['m'],confirmed:true}));
   const candidate=task.sections[0];
+  expect(task.sourceQuestions).toMatchObject([{id:candidate.question!.id,materialId:'m',number:'1',prompt:'汇率'}]);
+  expect(task.sourceQuestions?.[0]).not.toHaveProperty('answer');
   const editedResponse=await materialStudyAction({action:'study-edit',courseId:'c',taskId:task.id,revision:task.revision,edits:[{id:candidate.id,title:candidate.title,body:candidate.body,destination}]});
   const edited=(await editedResponse.json()).task as MaterialStudyTask;expect(edited.sections[0].destination).toBe(destination);expect(edited.sections[0].review).toBe('pending');
   const approved=await reviseMaterialStudy({courseId:'c',taskId:task.id,revision:edited.revision,approveIds:[candidate.id]});
@@ -118,6 +120,35 @@ it('rejects invented question IDs during automatic organization',async()=>{
   expect(task.state).toBe('failed');expect(task.sections).toEqual([]);expect(task.error).toContain('原题');expect(await db.originalQuestionBank.count()).toBe(0);
 });
 
+it('organizes a recognized question-only document without asking AI to classify it again',async()=>{
+  await db.material.deleteMany();
+  await material('m',['单选题',...Array.from({length:25},(_,index)=>[`${index+1}.这是完整的单选题题干（）。`,'A.选项甲 B.选项乙 C.选项丙 D.选项丁']).flat()]);
+  vi.mocked(generateWithDeepSeek).mockRejectedValue(new Error('AI 助手返回的整理结果格式有误'));
+  const task=await finished(await organizeMaterial({courseId:'c',mode:'material',routing:'auto',materialIds:['m'],confirmed:true}));
+  expect(task.state).toBe('ready');expect(task.done).toBe(task.total);expect(task.sections).toHaveLength(25);
+  expect(task.sections.every(section=>!section.generation&&section.question?.answerSource==='none')).toBe(true);
+  expect(generateWithDeepSeek).not.toHaveBeenCalled();expect(requestStructuredOutput).not.toHaveBeenCalled();
+});
+
+it('recovers an old failed question batch without duplicates or changing completed personal edits',async()=>{
+  await db.material.deleteMany();
+  await material('m',['单选题',...Array.from({length:25},(_,index)=>[`${index+1}.这是完整的单选题题干（）。`,'A.选项甲 B.选项乙 C.选项丙 D.选项丁']).flat()]);
+  vi.mocked(generateWithDeepSeek).mockImplementation(async(_pages,_annotations,_preset,questions=[])=>({model:'test',output:{sections:[],questionIds:questions.map(question=>question.id),warnings:[]}}));
+  const first=await finished(await organizeMaterial({courseId:'c',mode:'material',routing:'auto',materialIds:['m'],confirmed:true}));
+  const row=await db.materialStudyTask.findUniqueOrThrow({where:{id:first.id}}),content=JSON.parse(row.content);
+  const retained=content.sections.slice(0,10);retained[0]={...retained[0],body:'个人修订内容',review:'adopted'};
+  await db.materialStudyTask.update({where:{id:first.id},data:{content:JSON.stringify({...content,sections:retained,done:1,state:'partial',error:'AI 助手返回的整理结果格式有误，已完成的草稿已保留，请重试本批次。',warnings:['m.docx 第 21 段未被本次候选引用，请单独核对是否遗漏。']})}});
+  vi.mocked(generateWithDeepSeek).mockClear().mockRejectedValue(new Error('不应再次调用分类模型'));
+  const task=await finished(await organizeMaterial({courseId:'c',mode:'material',taskId:first.id,confirmed:true}));
+  expect(task.id).toBe(first.id);expect(task.state).toBe('ready');expect(task.error).toBe('');expect(task.sections).toHaveLength(25);
+  expect(new Set(task.sections.map(section=>section.question?.id)).size).toBe(25);
+  expect(task.sections.slice(0,10)).toEqual(retained);expect(generateWithDeepSeek).not.toHaveBeenCalled();
+  const completed=await db.materialStudyTask.findUniqueOrThrow({where:{id:task.id}});
+  await db.materialStudyTask.update({where:{id:task.id},data:{content:JSON.stringify({...JSON.parse(completed.content),state:'partial',error:''})}});
+  const finalized=await finished(await organizeMaterial({courseId:'c',mode:'material',taskId:task.id,confirmed:true}));
+  expect(finalized.state).toBe('ready');expect(finalized.sections).toEqual(task.sections);
+});
+
 it('uses existing corrected answers in drafts and protects later question-bank edits',async()=>{
   await db.material.deleteMany();await material('m',['名词解释','1.金融远期']);const [bank]=await prepareQuestionBanks('c',['m']);
   const corrected=await reviseBankQuestion('c',bank.id,bank.revision,bank.questions[0].id,{answer:'已有人工答案'});
@@ -127,6 +158,39 @@ it('uses existing corrected answers in drafts and protects later question-bank e
   await reviseBankQuestion('c',bank.id,corrected.revision,bank.questions[0].id,{answer:'另一窗口保存的最新答案'});
   await expect(adoptMaterialStudy({courseId:'c',taskId:task.id,revision:approved.revision,chosenIds:[task.sections[0].id],targets:[]})).rejects.toThrow(/来源变化|原题已/);
   expect(JSON.parse((await db.originalQuestionBank.findUniqueOrThrow({where:{id:bank.id}})).content).questions[0].answer).toBe('另一窗口保存的最新答案');
+});
+
+it('supplements missing draft answers only after opt-in and preserves the original question bank',async()=>{
+  await db.material.deleteMany();await material('m',['名词解释','1.金融远期','2.保本基金']);
+  const [bank]=await prepareQuestionBanks('c',['m']);
+  await reviseBankQuestion('c',bank.id,bank.revision,bank.questions[0].id,{answer:'已有人工答案'});
+  vi.mocked(generateWithDeepSeek).mockImplementation(async(_pages,_annotations,_preset,questions=[])=>({model:'test',output:{sections:[],questionIds:questions.map(question=>question.id),warnings:[]}}));
+  vi.mocked(requestStructuredOutput).mockImplementation(async input=>({model:'test',output:{answers:[{questionId:JSON.parse(input.input).questions[0].questionId,answer:'AI参考答案',explanation:'AI解析',topics:[],criteria:[],warnings:[]}]}}));
+  const base={courseId:'c',mode:'material' as const,routing:'auto' as const,materialIds:['m'],confirmed:true};
+  const plain=await finished(await organizeMaterial(base));
+  expect(requestStructuredOutput).not.toHaveBeenCalled();expect(plain.sections[1].question?.answer).toBe('');
+  const filled=await finished(await materialStudyAction({action:'study-organize',...base,supplementAnswers:true}).then(response=>response.json()).then(body=>body.task));
+  expect(filled.supplementAnswers).toBe(true);expect(filled.id).not.toBe(plain.id);
+  expect(filled.sections[0].question).toMatchObject({answer:'已有人工答案',answerSource:'manual'});
+  expect(filled.sections[1].question).toMatchObject({answer:'AI参考答案',answerSource:'ai',explanation:'AI解析',explanationSource:'ai'});
+  expect(filled.sections[1].body).toContain('【AI 补充答案】');expect(filled.sections.every(section=>section.review==='pending')).toBe(true);
+  expect(requestStructuredOutput).toHaveBeenCalledTimes(1);
+  expect(JSON.parse((await db.originalQuestionBank.findUniqueOrThrow({where:{id:bank.id}})).content).questions[1].answer).toBe('');
+  const reviewed=await reviseMaterialStudy({courseId:'c',taskId:filled.id,revision:filled.revision,approveIds:filled.sections.map(section=>section.id)});
+  const adopted=await adoptMaterialStudy({courseId:'c',taskId:filled.id,revision:reviewed.revision,chosenIds:reviewed.sections.map(section=>section.id),targets:[]});
+  expect(adopted.sections.every(section=>section.review==='adopted')).toBe(true);
+  expect(JSON.parse((await db.originalQuestionBank.findUniqueOrThrow({where:{id:bank.id}})).content).questions[1]).toMatchObject({answer:'AI参考答案',answerSource:'ai'});
+});
+
+it('preserves question drafts when opted-in answer generation fails and can retry existing drafts',async()=>{
+  await db.material.deleteMany();await material('m',['名词解释','1.金融远期']);
+  vi.mocked(generateWithDeepSeek).mockImplementation(async(_pages,_annotations,_preset,questions=[])=>({model:'test',output:{sections:[],questionIds:questions.map(question=>question.id),warnings:[]}}));
+  vi.mocked(requestStructuredOutput).mockRejectedValueOnce(new Error('请求超时'));
+  const task=await finished(await organizeMaterial({courseId:'c',mode:'material',routing:'auto',materialIds:['m'],confirmed:true,supplementAnswers:true}));
+  expect(task.state).toBe('partial');expect(task.sections).toHaveLength(1);expect(task.sections[0].question?.answerGeneration).toMatchObject({state:'failed'});
+  vi.mocked(requestStructuredOutput).mockImplementation(async input=>({model:'test',output:{answers:[{questionId:JSON.parse(input.input).questions[0].questionId,answer:'参考答案',explanation:'解析',topics:[],criteria:[],warnings:[]}]}}));
+  const retried=await finished(await organizeMaterial({courseId:'c',mode:'material',taskId:task.id,confirmed:true,supplementAnswers:true}));
+  expect(retried.sections[0].question).toMatchObject({answer:'参考答案',answerSource:'ai'});expect(retried.state).toBe('ready');
 });
 
 it('refreshes an old running snapshot when the worker completed during a task read',async()=>{
@@ -342,7 +406,7 @@ async function beginExam(){return db.originalPracticeSession.create({data:{id:'e
 it('hides a protected draft and blocks generation, approval and adoption until submission',async()=>{
   const task=await finished(await organizeMaterial({courseId:'c',mode:'material',materialIds:['m'],confirmed:true}));
   await beginExam();
-  const hidden=await getMaterialStudyTask('c',task.id);expect(hidden).toMatchObject({withheld:true,sections:[],error:''});
+  const hidden=await getMaterialStudyTask('c',task.id);expect(hidden).toMatchObject({withheld:true,sections:[],sourceQuestions:[],error:''});
   expect((await listMaterialStudyTasks('c'))[0].sections).toEqual([]);
   await expect(organizeMaterial({courseId:'c',mode:'material',materialIds:['m'],confirmed:true})).rejects.toThrow(/未交卷/);
   await expect(organizeMaterial({courseId:'c',mode:'material',taskId:task.id,confirmed:true})).rejects.toThrow(/未交卷/);

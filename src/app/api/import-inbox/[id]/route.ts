@@ -1,3 +1,4 @@
+import { withWorkspace } from '@/lib/workspace-scope';
 import { requirePrivateAccess } from '@/lib/private-access';
 import { NextResponse } from 'next/server';
 import { readFile, unlink } from 'node:fs/promises';
@@ -8,7 +9,7 @@ import { storeMaterial } from '@/lib/material-import';
 
 type Context = { params: Promise<{ id: string }> };
 export const runtime = 'nodejs';
-export async function PATCH(request: Request, { params }: Context) {
+async function handlePATCH(request: Request, { params }: Context) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -19,7 +20,7 @@ export async function PATCH(request: Request, { params }: Context) {
   } catch (error) { return errorResponse(error); }
 }
 
-export async function POST(request: Request, { params }: Context) {
+async function handlePOST(request: Request, { params }: Context) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -35,7 +36,7 @@ export async function POST(request: Request, { params }: Context) {
   } catch (error) { return errorResponse(error); }
 }
 
-export async function DELETE(request: Request, { params }: Context) {
+async function handleDELETE(request: Request, { params }: Context) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -44,3 +45,7 @@ export async function DELETE(request: Request, { params }: Context) {
     return NextResponse.json({ deleted: true });
   } catch (error) { return errorResponse(error); }
 }
+
+export const PATCH = withWorkspace(handlePATCH);
+export const POST = withWorkspace(handlePOST);
+export const DELETE = withWorkspace(handleDELETE);

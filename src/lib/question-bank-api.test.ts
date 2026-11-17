@@ -5,7 +5,7 @@ vi.mock('./db', async () => {
   const { PrismaClient } = await import('@prisma/client'), fs = await import('node:fs/promises'), path = await import('node:path');
   await fs.mkdir(path.resolve('tmp'), { recursive: true });
   const dataDir = await fs.mkdtemp(path.resolve('tmp/original-practice-'));
-  return { dataDir, db: new PrismaClient({ datasources: { db: { url: `file:${path.join(dataDir, 'test.db').replaceAll('\\', '/')}` } } }) };
+  return { dataDir,getDataDir:()=>dataDir, db: new PrismaClient({ datasources: { db: { url: `file:${path.join(dataDir, 'test.db').replaceAll('\\', '/')}` } } }) };
 });
 vi.mock('./deepseek', async original => ({ ...await original<typeof import('./deepseek')>(), deepSeekConfig: () => ({ configured: true, model: 'test' }), requestStructuredOutput: vi.fn() }));
 import { db, dataDir } from './db';

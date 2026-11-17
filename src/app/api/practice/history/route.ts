@@ -1,3 +1,4 @@
+import { withWorkspace } from '@/lib/workspace-scope';
 import { requirePrivateAccess } from '@/lib/private-access';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -6,7 +7,7 @@ import { historyMarkdown, practiceHistory } from '@/lib/practice-history';
 
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
-export async function GET(request:Request) {
+async function handleGET(request:Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -17,3 +18,5 @@ export async function GET(request:Request) {
     return format==='markdown'?new Response(historyMarkdown(data),{headers:{'Content-Type':'text/markdown; charset=utf-8','Content-Disposition':'attachment; filename="practice-history.md"','Cache-Control':'no-store'}}):NextResponse.json(data,{headers:{'Cache-Control':'no-store'}});
   } catch(error){return errorResponse(error);}
 }
+
+export const GET = withWorkspace(handleGET);

@@ -22,10 +22,11 @@ export type PreviewSelection = AnnotationAnchor & { image?: string };
 export type MaterialAnnotation = { id: string; materialId: string; courseId: string; name: string; sourceHash: string; extractionHash: string; anchor: AnnotationAnchor; refs: Reference[]; instruction: string; confirmedText: boolean; revision: number; createdAt: string; updatedAt: string; stale?: boolean; hasImage?: boolean };
 export type StudyCandidate = Section & { destination?: StudyDestination; question?: OriginalQuestion; practice?: {materialId:string;questionId:string;section?:'knowledge'|'mistakes'|'papers'}; excluded?: boolean; review: 'pending' | 'approved' | 'adopted'; adopted?: { pageId: string; pageTitle: string; chapterTitle: string }[] };
 export const studyDestination=(section:Pick<StudyCandidate,'destination'|'question'>):StudyDestination=>section.destination??(section.question?'practice':'notebook');
-export type MaterialStudyTask = { id: string; courseId: string; revision: number; mode: 'material' | 'annotations'; routing?: 'auto'; preset?: StudyPreset; materialIds: string[]; annotationIds: string[]; state: 'queued' | 'running' | 'ready' | 'partial' | 'failed'; done: number; total: number; sections: StudyCandidate[]; warnings: string[]; error: string; createdAt: string; updatedAt: string; stale?: boolean; withheld?: boolean };
+export type StudySourceQuestion = Pick<OriginalQuestion,'id'|'materialId'|'number'|'kind'|'section'|'prompt'|'sources'|'warnings'>;
+export type MaterialStudyTask = { id: string; courseId: string; revision: number; mode: 'material' | 'annotations'; routing?: 'auto'; supplementAnswers?: boolean; preset?: StudyPreset; materialIds: string[]; annotationIds: string[]; state: 'queued' | 'running' | 'ready' | 'partial' | 'failed'; done: number; total: number; sections: StudyCandidate[]; sourceQuestions?: StudySourceQuestion[]; warnings: string[]; error: string; createdAt: string; updatedAt: string; stale?: boolean; withheld?: boolean };
 export type StudyTarget = { sectionId: string; pageId?: string; chapterId?: string; chapterTitle?: string };
 export const studyEditsSchema = z.array(z.object({ id: z.string().min(1), title: z.string().trim().min(1).max(120), body: z.string().trim().min(1).max(80000), excluded: z.boolean().optional(), destination:studyDestinationSchema.optional(), question:z.object({prompt:z.string().trim().min(1).max(40000),answer:z.string().max(8000),explanation:z.string().max(8000)}).optional() })).min(1).max(2000);
-export function studyQuestionBody(question:Pick<OriginalQuestion,'context'|'prompt'|'options'|'answer'|'explanation'>){return [question.context&&`【材料】${question.context}`,`【题目】${question.prompt}`,...question.options.map(option=>`${option.label}. ${option.text}`),`【答案】${question.answer||'原文未提供答案'}`,question.explanation&&`【解析】${question.explanation}`].filter(Boolean).join('\n');}
+export function studyQuestionBody(question:Pick<OriginalQuestion,'context'|'prompt'|'options'|'answer'|'explanation'>&Partial<Pick<OriginalQuestion,'answerSource'|'explanationSource'>>){return [question.context&&`【材料】${question.context}`,`【题目】${question.prompt}`,...question.options.map(option=>`${option.label}. ${option.text}`),`【${question.answer&&question.answerSource==='ai'?'AI 补充答案':'答案'}】${question.answer||'原文未提供答案'}`,question.explanation&&`【${question.explanationSource==='ai'||question.answerSource==='ai'?'AI 补充解析':'解析'}】${question.explanation}`].filter(Boolean).join('\n');}
 export const normalizeQuote = (text: string) => text.replace(/\s+/g, '');
 export function conceptReferences(title: string, refs: Reference[]): Reference[] {
   const terms = refs.map(ref => {
@@ -62,10 +63,11 @@ export function validateSupplementOutput(input: unknown, annotations: { id: stri
 }
 export function questionOnlyContent(pages: {page:number;text:string}[], questions: OriginalQuestion[]) {
   if (!questions.length || questions.some(question => question.explanation.trim())) return false;
+  const normalizeText=(text:string)=>normalizeQuote(text.replace(/[\u200b-\u200f\ufeff]/g,'').replace(/&#(?:10|13);/g,'\n'));
   return pages.every(page => {
     if (headingKind(page.text.trim())) return true;
-    let remaining = normalizeQuote(page.text);
-    const snippets = questions.flatMap(question => question.sources.filter(source => source.page === page.page).map(source => normalizeQuote(source.snippet))).sort((a,b) => b.length-a.length);
+    let remaining = normalizeText(page.text);
+    const snippets = questions.flatMap(question => question.sources.filter(source => source.page === page.page).map(source => normalizeText(source.snippet))).sort((a,b) => b.length-a.length);
     for (const snippet of snippets) remaining = remaining.replace(snippet, '');
     return remaining.replace(/[\d\s.,，。．、:：;；()（）\[\]【】\-—]/g, '').length < 8;
   });

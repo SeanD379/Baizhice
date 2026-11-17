@@ -5,7 +5,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { Workspace } from '@/lib/types';
 import Workbench from './workbench';
 import { ThemeProvider } from './ui-theme';
-vi.mock('./use-notebook', () => ({ useNotebookStore: () => ({ data: { courseId: 'probability', revision: 1, updatedAt: '2026-09-29', document: { chapters: [], pages: [], inbox: [], trash: [] } }, status: '已保存', error: '', conflict: null, setEditingActive: vi.fn(), update: vi.fn(), flush: async () => true, reload: async () => {}, getCurrent: () => ({ revision: 1 }) }) }));
+import { UserPreferencesProvider } from './user-preferences';
+const notebookFlush = vi.hoisted(() => vi.fn(async () => true));
+vi.mock('./use-notebook', () => ({ useNotebookStore: () => ({ data: { courseId: 'probability', revision: 1, updatedAt: '2026-09-29', document: { chapters: [], pages: [], inbox: [], trash: [] } }, status: '已保存', error: '', conflict: null, setEditingActive: vi.fn(), update: vi.fn(), flush: notebookFlush, reload: async () => {}, getCurrent: () => ({ revision: 1 }) }) }));
 vi.mock('./material-study-reader', () => ({ MaterialStudyReader: () => <div>原文件阅读与批注</div> }));
 vi.mock('./file-practice', () => ({ FilePractice: ({onSource}:{onSource:(ref:{materialId:string;name:string;page:number;snippet:string;location:'paragraph'})=>void}) => <button onClick={()=>onSource({materialId:'preview-file',name:'讲义.docx',page:12,snippet:'原文件中的题目',location:'paragraph'})}>查看出处</button> }));
 vi.mock('./original-file-preview', () => ({ OriginalFilePreview: ({material,initialPage,studyAnnotations}:{material:{id:string};initialPage:number;studyAnnotations:{focusAnchor:{quote:string}}}) => <div data-original-preview={material.id} data-preview-page={initialPage} data-preview-quote={studyAnnotations.focusAnchor.quote}/> }));
@@ -25,16 +27,18 @@ const response = (body: unknown) => new Response(JSON.stringify(body), { status:
 
 const hubResponse = (url: string) => response({courseId:'probability',courseName:'概率论与数理统计',section:new URLSearchParams(url.split('?')[1]).get('section'),day:'2026-10-04',configured:false,materials:[],knowledge:[],catalog:[],records:[],withheldMaterials:[],daily:null,dailyCount:0,recommendation:null});
 
-async function renderWorkbench() {
-  await act(async () => root.render(<ThemeProvider><Workbench /></ThemeProvider>));
+async function renderWorkbench(accountEmail: string | null = null) {
+  await act(async () => root.render(<UserPreferencesProvider><ThemeProvider><Workbench accountEmail={accountEmail}/></ThemeProvider></UserPreferencesProvider>));
   await vi.waitFor(() => expect(container.textContent).toContain('今天想怎么学习？'));
 }
 
 beforeEach(() => {
   currentWorkspace = workspace;
+  notebookFlush.mockReset().mockResolvedValue(true);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('matchMedia', (media: string) => ({ media, matches: false, onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; } }));
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url.startsWith('/api/practice-hub')) return hubResponse(url);
     if (url.startsWith('/api/practice-state')) return response({states:[]});
@@ -64,14 +68,152 @@ it('offers a theme switch without clearing an unsent question', async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(question, draft);
     question.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  const toggle = container.querySelector<HTMLButtonElement>('button[aria-label="切换到夜间模式"]');
+  const profile = container.querySelector<HTMLButtonElement>('button[aria-label="打开个人菜单"]');
+  expect(profile).not.toBeNull();
+  await act(async () => profile!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  const toggle = document.querySelector<HTMLButtonElement>('[role="menuitemcheckbox"][aria-label="深色模式"]');
   expect(toggle).not.toBeNull();
   await act(async () => toggle!.click());
   expect(document.documentElement.dataset.theme).toBe('dark');
   expect(window.localStorage.getItem('lms.theme')).toBe('dark');
   expect(container.querySelector('textarea')).toBe(question);
   expect(question.value).toBe(draft);
-  expect(container.querySelector('button[aria-label="切换到白天模式"]')).not.toBeNull();
+  expect(document.querySelector('[role="menuitemcheckbox"][aria-checked="true"]')).not.toBeNull();
+});
+it('saves a focused nickname on the first outside click without closing settings or losing the learning draft', async () => {
+  await renderWorkbench('learner@example.com');
+  const question = container.querySelector<HTMLTextAreaElement>('textarea')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(question, '还没发送的学习问题');
+    question.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  async function openSettings() {
+    await act(async () => container.querySelector('button[aria-label="打开个人菜单"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    await act(async () => (document.querySelector('[role="menuitem"]') as HTMLElement).click());
+  }
+  await openSettings();
+  expect(document.querySelector('.settings-account-status')?.textContent).toContain('已登录');
+  expect(document.querySelector('.settings-account-email')?.textContent).toBe('learner@example.com');
+  expect(document.querySelector('.settings-profile-section h2')).toBeNull();
+  await act(async () => document.querySelector<HTMLElement>('[aria-label="编辑昵称"]')!.click());
+  const name = document.querySelector<HTMLInputElement>('#settings-nickname')!;
+  expect(name.readOnly).toBe(false);
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(name, '小林');
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    name.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  expect(container.querySelector('.user-profile-name')?.textContent).toBe('私人学习者');
+  const close = document.querySelector<HTMLButtonElement>('button[aria-label="关闭设置"]')!;
+  await act(async () => {
+    close.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+    close.click();
+  });
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(container.querySelector('.user-profile-name')?.textContent).toBe('小林');
+  expect(JSON.parse(localStorage.getItem('lms.user-preferences.v1')!).nickname).toBe('小林');
+  await act(async () => (document.querySelector('button[aria-label="关闭设置"]') as HTMLButtonElement).click());
+  expect(container.querySelector('textarea')).toBe(question);
+  expect(question.value).toBe('还没发送的学习问题');
+  await vi.waitFor(() => expect(document.activeElement).toBe(container.querySelector('button[aria-label="打开个人菜单"]')));
+  await openSettings();
+  await act(async () => document.querySelector<HTMLElement>('[aria-label="编辑昵称"]')!.click());
+  const unsaved = document.querySelector<HTMLInputElement>('#settings-nickname')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(unsaved, '未保存的新名字');
+    unsaved.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const cancelProfile = document.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="取消编辑昵称"]');
+  expect(cancelProfile).not.toBeNull();
+  await act(async () => cancelProfile!.click());
+  expect(unsaved.value).toBe('小林');
+  await act(async () => document.querySelector<HTMLElement>('[aria-label="编辑昵称"]')!.click());
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(unsaved, '仍未保存的名字');
+    unsaved.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => unsaved.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  await act(async () => (document.querySelector('button[aria-label="关闭设置"]') as HTMLButtonElement).click());
+  expect(container.querySelector('.user-profile-name')?.textContent).toBe('小林');
+});
+it('keeps an invalid focused nickname open and consumes a click on a different settings category', async () => {
+  await renderWorkbench('learner@example.com');
+  await act(async () => container.querySelector('button[aria-label="打开个人菜单"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await act(async () => (document.querySelector('[role="menuitem"]') as HTMLElement).click());
+  await act(async () => document.querySelector<HTMLElement>('[aria-label="编辑昵称"]')!.click());
+  const name = document.querySelector<HTMLInputElement>('#settings-nickname')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(name, ' '); name.dispatchEvent(new Event('input', { bubbles: true })); });
+  await act(async () => document.querySelector<HTMLButtonElement>('#settings-tab-appearance')!.click());
+  expect(document.querySelector('#settings-panel-profile')).not.toBeNull();
+  expect(name.readOnly).toBe(false);
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain('1–20');
+  expect(localStorage.getItem('lms.user-preferences.v1')).toBeNull();
+});
+it('only prompts a signed-out learner to log in and keeps other settings available', async () => {
+  await renderWorkbench();
+  await act(async () => container.querySelector('button[aria-label="打开个人菜单"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await act(async () => (document.querySelector('[role="menuitem"]') as HTMLElement).click());
+  const panel = document.querySelector('#settings-panel-profile')!;
+  expect(panel.textContent?.trim()).toBe('请先登录登录');
+  expect(panel.querySelector('form')).toBeNull();
+  expect(panel.querySelector('input')).toBeNull();
+  expect(panel.querySelector('a')).toBeNull();
+  await act(async () => (document.querySelector('#settings-tab-appearance') as HTMLButtonElement).click());
+  expect(document.querySelector('[role="switch"][aria-label="深色模式"]')).not.toBeNull();
+});
+it('opens personal settings after login and consumes only its return marker', async () => {
+  window.history.replaceState(null, '', '/?course=probability&view=library&chat=c1&settings=profile');
+  await act(async () => root.render(<UserPreferencesProvider><ThemeProvider><Workbench accountEmail="learner@example.com"/></ThemeProvider></UserPreferencesProvider>));
+  await vi.waitFor(() => expect(document.querySelector('.settings-account-email')?.textContent).toBe('learner@example.com'));
+  const params = new URLSearchParams(window.location.search);
+  expect(params.get('settings')).toBeNull();
+  expect(params.get('course')).toBe('probability');
+  expect(params.get('view')).toBe('library');
+  expect(params.get('chat')).toBe('c1');
+});
+it('allows cancelling login navigation without clearing an unsent question', async () => {
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  await renderWorkbench();
+  const question = container.querySelector<HTMLTextAreaElement>('textarea')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(question, '登录前保留的问题');
+    question.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => container.querySelector('button[aria-label="打开个人菜单"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await act(async () => (document.querySelector('[role="menuitem"]') as HTMLElement).click());
+  await act(async () => document.querySelector<HTMLButtonElement>('.settings-login-button')!.click());
+  expect(confirm).toHaveBeenCalledWith(expect.stringContaining('未发送'));
+  expect(question.value).toBe('登录前保留的问题');
+  expect(document.querySelector('#settings-panel-profile')).not.toBeNull();
+  expect(notebookFlush).not.toHaveBeenCalled();
+  confirm.mockRestore();
+});
+it('keeps the settings open and reports a failed save before login navigation', async () => {
+  notebookFlush.mockResolvedValueOnce(false);
+  await renderWorkbench();
+  await act(async () => container.querySelector('button[aria-label="打开个人菜单"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await act(async () => (document.querySelector('[role="menuitem"]') as HTMLElement).click());
+  await act(async () => document.querySelector<HTMLButtonElement>('.settings-login-button')!.click());
+  expect(notebookFlush).toHaveBeenCalled();
+  expect(document.querySelector('[role="dialog"] [role="alert"]')?.textContent).toContain('尚未保存');
+});
+it('shows the actual conversation total when settings are opened directly from the library', async () => {
+  currentWorkspace = { ...workspace, courses: [{ id: 'probability', name: '概率论与数理统计', conversationCount: 73 }] };
+  window.history.replaceState(null, '', '/?course=probability&view=library');
+  await act(async () => root.render(<UserPreferencesProvider><ThemeProvider><Workbench/></ThemeProvider></UserPreferencesProvider>));
+  await act(async () => container.querySelector('button[aria-label="打开个人菜单"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await act(async () => (document.querySelector('[role="menuitem"]') as HTMLElement).click());
+  await act(async () => (document.querySelector('#settings-tab-space') as HTMLButtonElement).click());
+  await vi.waitFor(() => expect(document.querySelectorAll('.settings-space-stats b')[1]?.textContent).toBe('73'));
+});
+it('returns focus to mobile navigation after the settings dialog is resized to a narrow screen', async () => {
+  await renderWorkbench();
+  await act(async () => container.querySelector('button[aria-label="打开个人菜单"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await act(async () => (document.querySelector('[role="menuitem"]') as HTMLElement).click());
+  vi.stubGlobal('innerWidth', 390);
+  await act(async () => (document.querySelector('button[aria-label="关闭设置"]') as HTMLButtonElement).click());
+  await vi.waitFor(() => expect(document.activeElement).toBe(container.querySelector('button[aria-label="展开课程导航"]')));
 });
 it('opens the original Word preview from file practice and retains the original-file fallback link',async()=>{
   currentWorkspace={...workspace,materials:[{id:'preview-file',courseId:'probability',name:'讲义.docx',mime:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',size:20,fixture:null,chapter:'',status:'extracted',excluded:false,origin:'本机上传',createdAt:''}]};

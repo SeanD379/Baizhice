@@ -3,18 +3,20 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { db, dataDir } from './db';
+import { db, getDataDir } from './db';
 import { extractionSchema, type Extraction } from './extraction-types';
 const exec=promisify(execFile);
-const directory=path.join(dataDir,'extractions');
 const globalJobs=globalThis as unknown as { extractionJobs?:Map<string,Promise<Extraction>> };
 const jobs=globalJobs.extractionJobs??=new Map();
-export const isExtracting=(id:string)=>jobs.has(id);
+const jobKey=(id:string)=>path.join(getDataDir(),'extractions',id);
+export const isExtracting=(id:string)=>jobs.has(jobKey(id));
 export async function readExtraction(id:string):Promise<Extraction|null>{
+  const directory=path.join(getDataDir(),'extractions');
   try{return extractionSchema.parse(JSON.parse(await readFile(path.join(directory,`${id}.json`),'utf8')));}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw new Error('识别记录无法读取，请重新提取原文件。');}
 }
 export function extractMaterial(material:{id:string;filePath:string;mime:string;fixture:string|null},options:{continue?:boolean}={}):Promise<Extraction>{
-  const existing=jobs.get(material.id);if(existing)return existing;
+  const directory=path.join(getDataDir(),'extractions'),key=jobKey(material.id);
+  const existing=jobs.get(key);if(existing)return existing;
   if(jobs.size>=2)return Promise.reject(new Error('本机已有两份资料正在识别，请稍后重试。'));
   const task=(async()=>{
     const previous=await readExtraction(material.id);
@@ -39,7 +41,7 @@ export function extractMaterial(material:{id:string;filePath:string;mime:string;
     }
     await mkdir(directory,{recursive:true});
     if(previous){
-      const history=path.join(dataDir,'extraction-history',material.id);
+      const history=path.join(getDataDir(),'extraction-history',material.id);
       await mkdir(history,{recursive:true});
       await writeFile(path.join(history,`${Date.now()}-${randomUUID()}.json`),JSON.stringify(previous),'utf8');
     }
@@ -48,6 +50,6 @@ export function extractMaterial(material:{id:string;filePath:string;mime:string;
     if(!material.fixture)await db.material.update({where:{id:material.id},data:{status:result.pages.some(p=>p.state==='extracted')?'extracted':'stored'}});
     return result;
   })();
-  jobs.set(material.id,task);void task.then(()=>{jobs.delete(material.id);void import('./material-auto-import').then(module=>module.queueMaterialImport(material.id)).catch(()=>{});},()=>jobs.delete(material.id));
+  jobs.set(key,task);void task.then(()=>{jobs.delete(key);void import('./material-auto-import').then(module=>module.queueMaterialImport(material.id)).catch(()=>{});},()=>jobs.delete(key));
   return task;
 }

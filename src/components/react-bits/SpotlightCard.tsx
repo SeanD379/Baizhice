@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { useTheme } from '../ui-theme';
+import { useAppReducedMotion } from '../user-preferences';
 
 import './SpotlightCard.css';
 
@@ -99,6 +100,7 @@ const SpotlightCard = ({
   ...rest
 }: SpotlightCardProps) => {
   const { theme: globalTheme } = useTheme();
+  const reduce = useAppReducedMotion();
   const theme = cardTheme ?? globalTheme;
   const rootRef = useRef<HTMLDivElement>(null);
   const lightRef = useRef<HTMLSpanElement>(null);
@@ -135,7 +137,7 @@ const SpotlightCard = ({
     const edge = edgeRef.current;
     if (!root || !light || !noise || !edge) return undefined;
 
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    if (reduce) { light.style.opacity = edge.style.opacity = noise.style.opacity = '0'; return; }
     const state = { x: 0, y: 0, presence: 0, flare: 0, time: Math.random() * 60, pressed: false, visible: true };
     const pointer = { x: 0, y: 0, active: false };
     const drawn = { light: '', edge: '', noise: '' };
@@ -298,7 +300,7 @@ const SpotlightCard = ({
       root.removeEventListener('focusout', onFocusOut);
       wakeRef.current = null;
     };
-  }, []);
+  }, [reduce]);
 
   return (
     <div

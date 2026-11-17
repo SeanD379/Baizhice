@@ -5,6 +5,40 @@ import { PreviewAnnotations } from './preview-annotations';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
+it('moves the annotation composer by its header, keeps its position when scrolling and stays inside the viewport',async()=>{
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);
+  vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});
+  vi.stubGlobal('innerWidth',1000);vi.stubGlobal('innerHeight',800);
+  const page=document.createElement('section'),mount=document.createElement('div');document.body.append(page,mount);
+  vi.spyOn(page,'getBoundingClientRect').mockReturnValue({left:100,top:100,width:500,height:400} as DOMRect);
+  vi.spyOn(HTMLElement.prototype,'offsetWidth','get').mockReturnValue(320);
+  vi.spyOn(HTMLElement.prototype,'offsetHeight','get').mockReturnValue(260);
+  const pending={kind:'region' as const,page:1,quote:'选区文字',prefix:'',suffix:'',rects:[{x:.1,y:.1,width:.2,height:.1}]};
+  const composer={instruction:'整理知识点',busy:'',onChange:vi.fn(),onCancel:vi.fn(),onSave:vi.fn(),onDetails:vi.fn()};
+  const root=createRoot(mount);
+  try{
+    await act(async()=>root.render(<PreviewAnnotations root={page} page={1} pending={pending} composer={composer}/>));
+    const popup=document.querySelector<HTMLFormElement>('.file-annotation-composer')!,header=popup.querySelector('header')!;
+    const pointer=async(target:Element,type:string,x:number,y:number)=>act(async()=>{const event=new MouseEvent(type,{bubbles:true,clientX:x,clientY:y});Object.defineProperty(event,'pointerId',{value:1});target.dispatchEvent(event);});
+    const position=()=>({left:parseFloat(popup.style.left),top:parseFloat(popup.style.top)}),initial=position();
+    await pointer(header,'pointerdown',170,200);await pointer(header,'pointermove',270,280);
+    expect(position()).toEqual({left:initial.left+100,top:initial.top+80});
+    await pointer(header,'pointerup',270,280);await pointer(header,'pointermove',400,400);
+    expect(position()).toEqual({left:initial.left+100,top:initial.top+80});
+    await act(async()=>document.dispatchEvent(new Event('scroll')));
+    expect(position()).toEqual({left:initial.left+100,top:initial.top+80});
+    await pointer(popup.querySelector('button')!,'pointerdown',280,280);await pointer(header,'pointermove',400,400);
+    expect(position()).toEqual({left:initial.left+100,top:initial.top+80});
+    vi.stubGlobal('innerWidth',390);vi.stubGlobal('innerHeight',500);
+    await act(async()=>window.dispatchEvent(new Event('resize')));
+    expect(position()).toEqual({left:58,top:228});
+    vi.stubGlobal('innerWidth',1000);vi.stubGlobal('innerHeight',800);
+    await act(async()=>root.render(<PreviewAnnotations root={page} page={1} pending={{...pending,rects:[{x:.2,y:.1,width:.2,height:.1}]}} composer={composer}/>));
+    expect(position()).toEqual({left:200,top:190});
+    await act(async()=>popup.querySelector<HTMLButtonElement>('button')!.click());expect(composer.onCancel).toHaveBeenCalledOnce();
+  }finally{await act(async()=>root.unmount());page.remove();mount.remove();vi.restoreAllMocks();vi.unstubAllGlobals();}
+});
+
 it('drags the reading viewport in the grab direction and stops after releasing the pointer',async()=>{
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);
   vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});

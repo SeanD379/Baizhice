@@ -1,8 +1,9 @@
+import { withWorkspace } from '@/lib/workspace-scope';
 import { requirePrivateAccess } from '@/lib/private-access';
 import { createHash, randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { db } from '@/lib/db';
+import { db, getDataDir } from '@/lib/db';
 import { checkOrigin, errorResponse, publicVersion } from '@/lib/server';
 import { mergeAdditions } from '@/lib/content';
 import { pageSchema, validatePages, validateOutput } from '@/lib/generation';
@@ -22,7 +23,7 @@ const schema=z.discriminatedUnion('action',[
 const activeCourses=new Set<string>();
 const staleMessage='已有更新版本，请重新打开生成窗口；原有内容和个人编辑未被覆盖。';
 
-export async function GET(request:Request) {
+async function handleGET(request:Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -41,7 +42,7 @@ export async function GET(request:Request) {
   }
   catch(error){return errorResponse(error);}
 }
-export async function POST(request:Request) {
+async function handlePOST(request:Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   let activeCourse:string|undefined;
   try {
@@ -50,9 +51,9 @@ export async function POST(request:Request) {
     if(typeof body.action==='string'&&body.action.startsWith('study-'))return await materialStudyAction(body);
     const input=schema.parse(body);
     if(input.action==='preview') {
-      if(activeCourses.has(input.courseId))throw new Error('这门课正在生成，请等待当前请求完成。');
+      if(activeCourses.has(JSON.stringify([getDataDir(),input.courseId])))throw new Error('这门课正在生成，请等待当前请求完成。');
       if(activeCourses.size>=2)throw new Error('当前已有两项生成任务，请稍后重试。');
-      activeCourse=input.courseId;activeCourses.add(activeCourse);
+      activeCourse=JSON.stringify([getDataDir(),input.courseId]);activeCourses.add(activeCourse);
       const latest=await db.version.findFirst({where:{courseId:input.courseId},orderBy:{number:'desc'}});
       if((latest?.id??null)!==input.expectedVersionId)throw new Error(staleMessage);
       const available=await generationSources(input.courseId),pages=validatePages(input.pages,available.pages);
@@ -96,8 +97,12 @@ export async function POST(request:Request) {
   finally {if(activeCourse)activeCourses.delete(activeCourse);}
 }
 
-export async function PATCH(request:Request) {
+async function handlePATCH(request:Request) {
   const denied=await requirePrivateAccess(request);if(denied)return denied;
   try {checkOrigin(request);return await materialStudyAction(await request.json());}
   catch(error){if(error instanceof NotebookConflict)return NextResponse.json({error:'活页已更新，请刷新并重新选择位置；当前草稿保留。',current:error.current},{status:409});return errorResponse(error);}
 }
+
+export const GET = withWorkspace(handleGET);
+export const POST = withWorkspace(handlePOST);
+export const PATCH = withWorkspace(handlePATCH);

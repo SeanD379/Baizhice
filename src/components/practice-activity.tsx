@@ -1,4 +1,5 @@
 'use client';
+import { workspaceFetch } from '@/lib/workspace-storage';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Bookmark, Check, FileText, History, LoaderCircle, Play, Plus, Search, Sparkles } from 'lucide-react';
 import { Button } from './ui/button';
@@ -50,7 +51,7 @@ function PaperManager({ courseId, materials, onMaterial, onUpload, onReload, onO
   const [selected, setSelected] = useState<string[]>([]), [busy, setBusy] = useState(false), [error, setError] = useState('');
   async function addPapers() {
     setBusy(true); setError('');
-    try { for (const id of selected) { const response = await fetch(`/api/materials/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chapter: '历年套卷' }) }); const result = await response.json(); if (!response.ok) throw Error(result.error); } await onReload(); setSelected([]); }
+    try { for (const id of selected) { const response = await workspaceFetch(`/api/materials/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chapter: '历年套卷' }) }); const result = await response.json(); if (!response.ok) throw Error(result.error); } await onReload(); setSelected([]); }
     catch (e) { setError(e instanceof Error ? e.message : '归类失败，请重试。'); } finally { setBusy(false); }
   }
   return <div className="hub-paper-manager"><p className="hub-small-copy">选择本课程中的原卷资料并归入试卷书架。点击资料可以核对识别文字、调整章节或处理来源疑点。</p>{materials.length ? <div className="hub-material-list">{materials.map(material => <div key={material.id}><label><input type="checkbox" checked={selected.includes(material.id)} disabled={busy || material.excluded || !!material.conflictResolution} onChange={e => setSelected(ids => e.target.checked ? [...ids, material.id] : ids.filter(id => id !== material.id))}/><FileText size={17}/><span>{material.name}<small>{material.chapter} · {material.status === 'stored' ? '待提取文字' : material.excluded ? '已排除' : material.conflictResolution ? '来源待处理' : '可核对'}</small></span></label><Button size="sm" variant="ghost" onClick={() => onMaterial(material)}>核对与整理</Button>{material.chapter === '历年套卷' && <Button size="sm" disabled={material.excluded || !!material.conflictResolution} onClick={() => onOpen({ section: 'papers', activity: 'practice', materialId: material.id })}>选择这份原卷</Button>}</div>)}</div> : <HubEmpty icon="papers" title="还没有可选资料" text="上传一份 PDF、Word 或文字试卷，再核对完整原题。" action="上传原卷" onClick={onUpload}/>}<div className="hub-form-actions"><Button variant="primary" disabled={busy || !selected.length} onClick={() => void addPapers()}>{busy && <LoaderCircle className="spin" size={15}/>}将所选 {selected.length} 份归入试卷书架</Button><Button onClick={onUpload}>上传新资料</Button></div>{error && <p role="alert" className="modal-error">{error}</p>}<small className="hub-small-copy">当前课程：{courseId ? '所选资料只在这门课程内整理' : ''}</small></div>;

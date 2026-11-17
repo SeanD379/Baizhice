@@ -1,4 +1,5 @@
 'use client';
+import { withBasePath } from '@/lib/base-path';
 import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import katex from 'katex';
 import { ArrowUpRight, CheckCheck, ChevronDown, FileText } from 'lucide-react';
@@ -15,7 +16,7 @@ function NotebookImage({ src, alt }: { src: string; alt: string }) {
     void localImageBlob(src).then(blob => { if (!cancelled && blob) { url = URL.createObjectURL(blob); setLocal(url); } }).catch(() => {});
     return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
   }, [src]);
-  return <img src={src.startsWith('notebook-local:') ? local || undefined : src} alt={alt}/>;
+  return <img src={src.startsWith('notebook-local:') ? local || undefined : withBasePath(src)} alt={alt}/>;
 }
 
 function inline(node: RichNode): ReactNode {
@@ -26,7 +27,7 @@ function inline(node: RichNode): ReactNode {
     if (mark.type === 'strike') result = <s>{result}</s>;
     if (mark.type === 'code') result = <code>{result}</code>;
     if (mark.type === 'underline') result = <u>{result}</u>;
-    if (mark.type === 'link') { const href = String(mark.attrs?.href ?? ''); if (/^(https?:\/\/|mailto:|\/api\/)/i.test(href)) result = <a href={href} target="_blank" rel="noreferrer">{result}</a>; }
+    if (mark.type === 'link') { const href = String(mark.attrs?.href ?? ''); if (/^(https?:\/\/|mailto:|\/api\/)/i.test(href)) result = <a href={withBasePath(href)} target="_blank" rel="noreferrer">{result}</a>; }
   }
   return result;
 }
@@ -34,7 +35,7 @@ export function SourceNote({ origin, onReference, onConfirm }: { origin: Noteboo
   const groups = new Map<string, { name: string; refs: Reference[] }>();
   for (const reference of origin.refs ?? []) { const group = groups.get(reference.materialId) ?? { name: reference.name, refs: [] }; group.refs.push(reference); groups.set(reference.materialId, group); }
   const sourceName = groups.size === 1 ? [...groups.values()][0].name : `${groups.size} 份资料`;
-  return <footer className="loose-source"><span>{notebookOriginLabel(origin)}{origin.needsReview && ' · 待核对'}</span>{!!groups.size && <details className="loose-source-refs"><summary title={referenceOriginLabel(origin.generation)}><FileText size={12}/><span>{sourceName}</span><small>{origin.refs.length} 处出处</small><ChevronDown size={12}/></summary><div className="loose-source-list">{origin.generation?.contentOrigin === 'ai-supplement' && <p>{referenceOriginLabel(origin.generation)}</p>}{[...groups.entries()].map(([id, group]) => <div key={id}><strong>{group.name}</strong><div>{group.refs.map((reference, index) => <button key={index} type="button" onClick={() => onReference?.(reference)} title={reference.snippet} aria-label={`查看 ${reference.name} · ${referenceLocation(reference)}`}>{referenceLocation(reference)}<ArrowUpRight size={11}/></button>)}</div></div>)}</div></details>}{origin.exam && <a href={`/?course=${encodeURIComponent(origin.courseId ?? 'high-school-chinese')}&view=practice&section=papers&paper=${encodeURIComponent(origin.exam.materialId)}&question=${origin.exam.question}`} target="_blank" rel="noreferrer">回到原题<ArrowUpRight size={11}/></a>}{origin.kind === 'chat' && origin.conversationId && <a href={`/?course=${encodeURIComponent(origin.courseId ?? 'high-school-chinese')}&view=home&chat=${encodeURIComponent(origin.conversationId)}`} target="_blank" rel="noreferrer">回到对话<ArrowUpRight size={11}/></a>}{onConfirm && origin.needsReview && !!origin.refs?.length && <button type="button" onClick={onConfirm}><CheckCheck size={13}/>我已核对</button>}</footer>;
+  return <footer className="loose-source"><span>{notebookOriginLabel(origin)}{origin.needsReview && ' · 待核对'}</span>{!!groups.size && <details className="loose-source-refs"><summary title={referenceOriginLabel(origin.generation)}><FileText size={12}/><span>{sourceName}</span><small>{origin.refs.length} 处出处</small><ChevronDown size={12}/></summary><div className="loose-source-list">{origin.generation?.contentOrigin === 'ai-supplement' && <p>{referenceOriginLabel(origin.generation)}</p>}{[...groups.entries()].map(([id, group]) => <div key={id}><strong>{group.name}</strong><div>{group.refs.map((reference, index) => <button key={index} type="button" onClick={() => onReference?.(reference)} title={reference.snippet} aria-label={`查看 ${reference.name} · ${referenceLocation(reference)}`}>{referenceLocation(reference)}<ArrowUpRight size={11}/></button>)}</div></div>)}</div></details>}{origin.exam && <a href={withBasePath(`/?course=${encodeURIComponent(origin.courseId ?? 'high-school-chinese')}&view=practice&section=papers&paper=${encodeURIComponent(origin.exam.materialId)}&question=${origin.exam.question}`)} target="_blank" rel="noreferrer">回到原题<ArrowUpRight size={11}/></a>}{origin.kind === 'chat' && origin.conversationId && <a href={withBasePath(`/?course=${encodeURIComponent(origin.courseId ?? 'high-school-chinese')}&view=home&chat=${encodeURIComponent(origin.conversationId)}`)} target="_blank" rel="noreferrer">回到对话<ArrowUpRight size={11}/></a>}{onConfirm && origin.needsReview && !!origin.refs?.length && <button type="button" onClick={onConfirm}><CheckCheck size={13}/>我已核对</button>}</footer>;
 }
 export function NotebookContent({ node, onReference, onConfirm }: { node: RichNode; onReference?: (reference: Reference) => void; onConfirm?: (id: string, origin: NotebookOrigin) => void }): ReactNode {
   const content = node.content?.map((child, index) => <Fragment key={index}><NotebookContent node={child} onReference={onReference} onConfirm={onConfirm}/></Fragment>);

@@ -8,7 +8,7 @@ vi.mock('./db',async()=>{
   const path=await import('node:path');
   const directory=path.resolve('tmp');await mkdir(directory,{recursive:true});
   const dataDir=await mkdtemp(path.join(directory,'generation-api-'));
-  return {dataDir,db:new PrismaClient({datasources:{db:{url:`file:${path.join(dataDir,'test.db').replaceAll('\\','/')}`}}})};
+  return {dataDir,getDataDir:()=>dataDir,db:new PrismaClient({datasources:{db:{url:`file:${path.join(dataDir,'test.db').replaceAll('\\','/')}`}}})};
 });
 vi.mock('./deepseek',async importOriginal=>({...await importOriginal<typeof import('./deepseek')>(),generateWithDeepSeek:vi.fn()}));
 import { db, dataDir } from './db';

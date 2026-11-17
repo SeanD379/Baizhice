@@ -1,4 +1,6 @@
 'use client';
+import { withBasePath } from '@/lib/base-path';
+import { workspaceFetch } from '@/lib/workspace-storage';
 import { useEffect, useState } from 'react';
 import { ArrowRight, FileText, LoaderCircle } from 'lucide-react';
 import { Modal } from './ui/modal';
@@ -14,7 +16,7 @@ type PendingPreview={id:string;createdAt:string;model:string;sectionCount:number
 
 const pageKey=(page:SourcePage)=>`${page.materialId}:${page.page}`;
 async function request<T>(url:string,body?:unknown):Promise<T> {
-  const response=await fetch(url,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{cache:'no-store'});
+  const response=await workspaceFetch(url,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{cache:'no-store'});
   const data=await response.json().catch(()=>({error:'服务暂时不可用，请保留页面并重试。'}));
   if(!response.ok)throw new Error(data.error||'操作失败，请重试。');return data;
 }
@@ -80,7 +82,7 @@ export function GenerationDialog({courseId,expectedVersionId,materialIds,noteboo
           <label className="generation-choice"><input type="checkbox" checked={checked} disabled={busy} onChange={e=>{const value=e.target.checked;setSelected(v=>({...v,...Object.fromEntries(block.pages.map(p=>[pageKey(p),value]))}));setConfirmed(false);}}/><span>{block.title}{section&&` · ${section}`}</span></label>
           <div className="generation-content-preview"><Markdown text={block.pages.map(p=>edits[pageKey(p)]??p.text).join('\n\n')}/></div>
           <p className="muted small">原文位置：{sourceLocation(first.name,first.page)}{last.page!==first.page&&` 至 ${sourceLocation(last.name,last.page)}`}</p>
-          {checked&&<details className="generation-content-edit"><summary>核对原文与修订文字</summary><p className="muted small">{[...new Set(block.pages.flatMap(p=>p.warnings))].join(' ')}</p>{block.pages.map(p=><label className="generation-text-label" key={pageKey(p)}>{sourceLocation(p.name,p.page)}<a href={`/api/files/${p.materialId}${/\.(docx|pptx|txt)$/i.test(p.name)?'':`#page=${p.page}`}`} target="_blank" rel="noreferrer">{originalLinkLabel(p.name,p.page)}</a><textarea aria-label={`${p.name} ${sourceLocation(p.name,p.page)}核对文字`} value={edits[pageKey(p)]??p.text} disabled={busy} maxLength={40000} onChange={e=>{setEdits(v=>({...v,[pageKey(p)]:e.target.value}));setConfirmed(false);}}/></label>)}</details>}
+          {checked&&<details className="generation-content-edit"><summary>核对原文与修订文字</summary><p className="muted small">{[...new Set(block.pages.flatMap(p=>p.warnings))].join(' ')}</p>{block.pages.map(p=><label className="generation-text-label" key={pageKey(p)}>{sourceLocation(p.name,p.page)}<a href={withBasePath(`/api/files/${p.materialId}${/\.(docx|pptx|txt)$/i.test(p.name)?'':`#page=${p.page}`}`)} target="_blank" rel="noreferrer">{originalLinkLabel(p.name,p.page)}</a><textarea aria-label={`${p.name} ${sourceLocation(p.name,p.page)}核对文字`} value={edits[pageKey(p)]??p.text} disabled={busy} maxLength={40000} onChange={e=>{setEdits(v=>({...v,[pageKey(p)]:e.target.value}));setConfirmed(false);}}/></label>)}</details>}
         </section>;
       })}</div></details>)}</div>
       <div className="generation-total">已选 {pages.length} 处原文 · {count} / 40000 字{count>40000&&<p role="alert">超出本次范围，请减少完整内容的选择，不会自动截断。</p>}</div>
@@ -93,7 +95,7 @@ export function GenerationDialog({courseId,expectedVersionId,materialIds,noteboo
       <p className="generation-notice">AI 助手 · {preview.sections.length} 段候选<br/>已核验引用摘录存在于所选文字中，尚未核验结论正确性。请核对公式、前提和是否与已有内容重复。</p>
       {preview.warnings.length>0&&<div className="generation-warnings"><b>覆盖不足与待核对事项</b><ul>{preview.warnings.map((text,i)=><li key={i}>{text}</li>)}</ul></div>}
       {!preview.sections.length&&<p>本次没有可采用的新内容。请查看上方提示，补充或调整资料范围后再生成。</p>}
-      {preview.sections.map(s=><section className="generation-page" key={s.id}><label className="generation-choice"><input type="checkbox" disabled={busy} checked={chosen.includes(s.id)} onChange={e=>setChosen(v=>e.target.checked?[...v,s.id]:v.filter(id=>id!==s.id))}/><b>{s.title}</b></label><Markdown text={s.body}/>{s.refs.map((ref,i)=><div className="generation-reference" key={i}><a href={`/api/files/${ref.materialId}#page=${ref.page}`} target="_blank" rel="noreferrer">{ref.name} · {sourceLocation(ref.name,ref.page)}</a><blockquote>{ref.snippet}</blockquote><small>摘录自本次核对后的文字；如曾修订，请同时对照原文件。</small></div>)}</section>)}
+      {preview.sections.map(s=><section className="generation-page" key={s.id}><label className="generation-choice"><input type="checkbox" disabled={busy} checked={chosen.includes(s.id)} onChange={e=>setChosen(v=>e.target.checked?[...v,s.id]:v.filter(id=>id!==s.id))}/><b>{s.title}</b></label><Markdown text={s.body}/>{s.refs.map((ref,i)=><div className="generation-reference" key={i}><a href={withBasePath(`/api/files/${ref.materialId}#page=${ref.page}`)} target="_blank" rel="noreferrer">{ref.name} · {sourceLocation(ref.name,ref.page)}</a><blockquote>{ref.snippet}</blockquote><small>摘录自本次核对后的文字；如曾修订，请同时对照原文件。</small></div>)}</section>)}
 
     </>}
     {preview&&notebook&&<section className="generation-page"><h3>归入我的活页笔记</h3><p>选择追加位置或建立新知识点。现有正文与个人补充会保留。</p>{preview.sections.filter(section=>chosen.includes(section.id)).map(section=>{

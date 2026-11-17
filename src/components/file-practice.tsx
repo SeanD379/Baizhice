@@ -1,4 +1,6 @@
 'use client';
+import { withBasePath } from '@/lib/base-path';
+import { workspaceSessionStorage } from '@/lib/workspace-storage';
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { ArrowRight, Check, FileText, ListChecks } from 'lucide-react';
 import { hubRequest } from './practice-hub';
@@ -19,7 +21,7 @@ type Stage = 'idle' | 'consent' | 'preparing' | 'review' | 'starting' | 'failed'
 const emptySelection = (): Selection => ({ questions: [], knowledge: [], generated: [], generatedFor: '' });
 const ready = (question: OriginalQuestion) => !!question.answer.trim() && question.answerSource !== 'none' && !!question.explanation.trim() && !question.knowledgeSourceStale;
 function readSelection(key: string): Selection {
-  try { const saved = JSON.parse(sessionStorage.getItem(key) ?? 'null'); if (saved && ['questions', 'knowledge', 'generated'].every(field => Array.isArray(saved[field]) && saved[field].every((id: unknown) => typeof id === 'string'))) return { ...saved, generatedFor: typeof saved.generatedFor === 'string' ? saved.generatedFor : '' }; } catch { /* A malformed cache must not prevent opening the file. */ }
+  try { const saved = JSON.parse(workspaceSessionStorage.getItem(key) ?? 'null'); if (saved && ['questions', 'knowledge', 'generated'].every(field => Array.isArray(saved[field]) && saved[field].every((id: unknown) => typeof id === 'string'))) return { ...saved, generatedFor: typeof saved.generatedFor === 'string' ? saved.generatedFor : '' }; } catch { /* A malformed cache must not prevent opening the file. */ }
   return emptySelection();
 }
 
@@ -32,7 +34,7 @@ export function FilePractice({ courseId, materialId, onOpen, onSource }: { cours
   const [tab, setTab] = useState<'questions' | 'knowledge'>('questions'), [bulk, setBulk] = useState(false), [stage, setStage] = useState<Stage>('idle');
   const [progress, setProgress] = useState({ label: '', done: 0, total: 0 }), operation = useRef(0), consented = useRef(''), mounted = useRef(true), starting = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { try { sessionStorage.setItem(cacheKey, JSON.stringify(selection)); } catch { /* The current selection still works when browser storage is unavailable. */ } }, [cacheKey, selection]);
+  useEffect(() => { try { workspaceSessionStorage.setItem(cacheKey, JSON.stringify(selection)); } catch { /* The current selection still works when browser storage is unavailable. */ } }, [cacheKey, selection]);
   useEffect(() => {
     let alive = true; setLoading(true); setError('');
     void Promise.all([
@@ -175,7 +177,7 @@ export function FilePractice({ courseId, materialId, onOpen, onSource }: { cours
       <div className="file-practice-cards" id={`${tabId}-panel`} role="tabpanel" aria-labelledby={`${tabId}-${tab}`}>
         {tab === 'questions' ? questions.length ? questions.map(question => <SpotlightCard theme="light" key={question.id} className="file-practice-card" spotlightColor="var(--hub-accent)" intensity={0.06} borderGlow={0.12} proximity={0} ambient={false} flare={false}>
           <label className="file-practice-card-heading"><input type="checkbox" aria-label={`选择题目 ${question.id}`} checked={selection.questions.includes(question.id)} disabled={locked} onChange={() => toggleQuestion(question)}/><strong>{originalKindNames[question.kind]} · {question.origin === 'variant' ? 'AI 自编' : '原题'} {question.number}</strong><small>{ready(question) ? question.practiceReview === 'pending' ? '待核对' : '答案已就绪' : '待补答案与解析'}</small></label>
-          {question.context && <details><summary>查看共同材料</summary><Markdown text={question.context}/></details>}<Markdown text={question.prompt}/>{question.options.length > 0 && <div className="file-practice-options">{question.options.map(option => <div key={option.label}><strong>{option.label}.</strong><Markdown text={option.text}/></div>)}</div>}{question.media?.map(media => <figure key={media.url}><img src={media.url} alt={media.label}/></figure>)}
+          {question.context && <details><summary>查看共同材料</summary><Markdown text={question.context}/></details>}<Markdown text={question.prompt}/>{question.options.length > 0 && <div className="file-practice-options">{question.options.map(option => <div key={option.label}><strong>{option.label}.</strong><Markdown text={option.text}/></div>)}</div>}{question.media?.map(media => <figure key={media.url}><img src={withBasePath(media.url)} alt={media.label}/></figure>)}
           <div className="file-practice-card-actions"><details className="file-practice-answer" open={stage === 'review' && selection.questions.includes(question.id) || undefined}><summary>查看答案与解析</summary><strong>{question.answerSource === 'ai' ? 'AI 参考答案' : question.answerSource === 'manual' ? '我的修订答案' : question.answerSource === 'none' ? '参考答案（待补齐）' : '资料答案'}</strong><Markdown text={question.answer || '答案待补齐'}/><strong>{question.explanationSource === 'ai' || question.answerSource === 'ai' ? 'AI 补充解析' : '解析'}</strong><Markdown text={question.explanation || '解析待补齐'}/>{question.warnings.length > 0 && <ul>{question.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}</details>
           {question.sources[0] && <button type="button" className="file-practice-source" onClick={() => onSource({ materialId, ...question.sources[0], name: material!.name })}><FileText size={14}/>查看出处 · {sourceLocation(material!.name, question.sources[0].page)}</button>}</div>
         </SpotlightCard>) : <p className="file-practice-empty">这份资料还没有收录题目，可以选择知识点生成练习。</p> : knowledge.length ? knowledge.map(page => {

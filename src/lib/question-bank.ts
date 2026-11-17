@@ -1,3 +1,4 @@
+import { withBasePath } from '@/lib/base-path';
 import type { OriginalQuestion, OriginalKind, OriginalSource } from './question-bank-types';
 export type SourcePart = { page: number; text: string; method?: string; warnings?: string[]; blocks?: { type: string; assetPath?: string; marker?: string }[] };
 export type DocumentGroup<T extends SourcePart = SourcePart> = { id: string; title: string; kind: 'question' | 'content'; pages: T[]; text: string };
@@ -68,7 +69,7 @@ export function parseOriginalQuestions(material: { id: string; name: string; mim
     if ((kind !== 'unknown' || /请选择|下列|回答|作答/.test(prompt))&&(!current.lecture||current.exercise||current.example||lectureExercise(prompt,options))) {
       const sources: OriginalSource[] = [];
       addSources(sources,[...current.contextSources,...current.chunks]);
-      const media = [...current.contextSources,...current.chunks].flatMap(({ page }) => (page.blocks ?? []).filter(block => block.type === 'image' && block.assetPath).map(block => ({ url: `/api/materials/${encodeURIComponent(material.id)}/assets?path=${encodeURIComponent(block.assetPath!)}`, label: block.marker ?? '原文图片' })));
+      const media = [...current.contextSources,...current.chunks].flatMap(({ page }) => (page.blocks ?? []).filter(block => block.type === 'image' && block.assetPath).map(block => ({ url: withBasePath(`/api/materials/${encodeURIComponent(material.id)}/assets?path=${encodeURIComponent(block.assetPath!)}`), label: block.marker ?? '原文图片' })));
       const explanation=clean(inlineExplanation?.[1]??'');
       questions.push({ id: `${material.id}:s${current.sectionIndex}:p${current.chunks[0].page.page}:q${current.number}`, materialId: material.id, number: current.number, section: current.section, kind, prompt, context: current.context, options, sources, topics: [], answer: answerText, answerSource: answerText ? 'original' : 'none', explanation, criteria: [], warnings: kind === 'unknown' ? ['请确认这道题的题型。'] : [], origin: 'original', ...(media.length ? { media: [...new Map(media.map(item => [item.url, item])).values()] } : {}) });
       if(answerText){const answerSources:OriginalSource[]=[];addSources(answerSources,current.chunks.filter(chunk=>/答案|解析/.test(chunk.text)));questions.at(-1)!.answerRefs=(answerSources.length?answerSources:sources).map(source=>({...source,materialId:material.id,sourceHash:material.hash}));}

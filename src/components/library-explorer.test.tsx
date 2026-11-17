@@ -106,6 +106,7 @@ it('keeps selection when only sorting changes, applies range filters on submit a
   await change('排序依据', 'size'); await change('排序方向', 'asc');
   await click('应用'); expect(container.querySelector('.library-selection-bar')?.textContent).toContain('已选 2 份');
   expect(container.querySelector('.material-name b')?.textContent).toBe('古诗.pdf');
+  await click('高级筛选');
   await change('最小文件大小', '100');
   expect(container.querySelectorAll('.material-row')).toHaveLength(2);
   await click('应用');

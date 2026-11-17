@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 
-vi.mock('./db',()=>({dataDir:'unused',db:{version:{findFirst:vi.fn(),findUnique:vi.fn()},material:{findMany:vi.fn(),findFirst:vi.fn()},practiceSet:{findFirst:vi.fn()},practiceSession:{findUnique:vi.fn()}}}));
+vi.mock('./db',()=>({getDataDir:()=>'unused',dataDir:'unused',db:{version:{findFirst:vi.fn(),findUnique:vi.fn()},material:{findMany:vi.fn(),findFirst:vi.fn()},practiceSet:{findFirst:vi.fn()},practiceSession:{findUnique:vi.fn()}}}));
 vi.mock('./generation-store',async importOriginal=>({...await importOriginal<typeof import('./generation-store')>(),readGeneration:vi.fn()}));
 vi.mock('./extraction',()=>({readExtraction:vi.fn(),isExtracting:vi.fn(()=>false)}));
 vi.mock('./deepseek',()=>({deepSeekConfig:vi.fn(()=>({configured:true,model:'mock'})),requestStructuredOutput:vi.fn()}));

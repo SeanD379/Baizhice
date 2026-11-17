@@ -1,9 +1,10 @@
 'use client';
+import { workspaceFetch } from '@/lib/workspace-storage';
 import { useEffect, useRef, useState } from 'react';
 import type { OriginalSessionData, OriginalSessionState } from '@/lib/question-bank-types';
 
 export async function originalRequest(body:object):Promise<OriginalSessionData> {
-  const response=await fetch('/api/practice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const response=await workspaceFetch('/api/practice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const result=await response.json();if(!response.ok)throw new Error(result.error||'操作失败，请保留本页答案后重试。');return result;
 }
 

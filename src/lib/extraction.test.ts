@@ -7,7 +7,7 @@ vi.mock('node:child_process',async()=>{
   const execFile=Object.assign(vi.fn(),{[promisify.custom]:async(_file:string,args:string[])=>{mock.args=args;return {stdout:mock.output,stderr:''};}});
   return {execFile};
 });
-vi.mock('./db',async()=>({dataDir:await (await import('node:fs/promises')).mkdtemp((await import('node:path')).join((await import('node:os')).tmpdir(),'lms-extraction-')),db:{material:{update:vi.fn()}}}));
+vi.mock('./db',async()=>{const dataDir=await (await import('node:fs/promises')).mkdtemp((await import('node:path')).join((await import('node:os')).tmpdir(),'lms-extraction-'));return {dataDir,getDataDir:()=>dataDir,db:{material:{update:vi.fn()}}};});
 import {dataDir} from './db';
 import {extractMaterial,readExtraction} from './extraction';
 const material={id:'m',mime:'text/plain',filePath:'test.txt',fixture:null};

@@ -1,4 +1,6 @@
 'use client';
+import { withBasePath } from '@/lib/base-path';
+import { workspaceFetch } from '@/lib/workspace-storage';
 
 import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
@@ -40,7 +42,7 @@ export function ExamWorkspace({ courseId, materials, initialMaterialId, initialQ
     let active = true;
     setLoading(true);
     void Promise.all(exams.map(async material => {
-      const response = await fetch(`/api/exam-records?courseId=${encodeURIComponent(courseId)}&materialId=${encodeURIComponent(material.id)}`, { cache: 'no-store' });
+      const response = await workspaceFetch(`/api/exam-records?courseId=${encodeURIComponent(courseId)}&materialId=${encodeURIComponent(material.id)}`, { cache: 'no-store' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? '作答记录读取失败。');
       return { id: material.id, record: data.record as ExamRecord, revision: data.revision as number };
@@ -64,7 +66,7 @@ export function ExamWorkspace({ courseId, materials, initialMaterialId, initialQ
         const content = JSON.stringify(latest.current[id]);
         if (active.current) setSaving(current => ({ ...current, [id]: true }));
         try {
-          const response = await fetch('/api/exam-records', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ courseId, materialId: id, revision: revisionRef.current[id], record: JSON.parse(content) }) });
+          const response = await workspaceFetch('/api/exam-records', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ courseId, materialId: id, revision: revisionRef.current[id], record: JSON.parse(content) }) });
           const result = await response.json();
           if (!response.ok) throw new Error(result.error ?? '作答记录保存失败。');
           revisionRef.current = { ...revisionRef.current, [id]: result.revision };
@@ -108,7 +110,7 @@ export function ExamWorkspace({ courseId, materials, initialMaterialId, initialQ
     {errors.load && <p className="modal-error" role="alert">{errors.load}</p>}
     {loading ? <p role="status">正在读取本机作答记录…</p> : selectedId && !currentExam ? <div role="alert" className="empty-state"><h2>这份原卷已移除或暂不可用</h2><p>原有作答仍保留；请回到试卷书架重新选择可用原卷。</p></div> : !exams.length ? <div className="empty-state"><h2>还没有套卷</h2><p>在资料库导入或归类一份 PDF 套卷后，就可以在这里记录作答。</p></div> : currentExam && <div className="exam-paper-workspace">
       <div className="exam-paper-picker"><label htmlFor="exam-paper-select">选择套卷</label><select id="exam-paper-select" value={currentExam.id} onChange={event => { setSelectedId(event.target.value); setQuestion(allowedQuestions[0]); }}>{exams.map(material => <option key={material.id} value={material.id}>{material.name}</option>)}</select></div>
-      <div className="exam-original"><div className="exam-original-heading"><div><h2>原卷 · 第 {question} 题</h2><p>{examReadingGuide(currentExam) ? '已跳到对应原卷页；' : '请翻到原题所在页；'}可用画笔或荧光笔标注原卷，再在答题区记录答案。</p></div><div className="exam-original-actions"><a href={`/api/files/${currentExam.id}#page=${examQuestionPage(currentExam.name, question)}`} target="_blank" rel="noreferrer">单独打开原题 ↗</a><Button variant="secondary" onClick={() => document.getElementById('exam-answer-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>填写第 {question} 题答案 ↓</Button></div></div><PdfPreview key={`${currentExam.id}-${question}`} url={`/api/files/${currentExam.id}`} initialPage={examQuestionPage(currentExam.name, question)} name={currentExam.name} landmarks={examReadingGuide(currentExam)?.landmarks} annotations={currentRecord.annotations} onAnnotationsChange={(page, strokes) => update(currentExam.id, record => ({ ...record, annotations: { ...record.annotations, [String(page)]: strokes } }))}/></div>
+      <div className="exam-original"><div className="exam-original-heading"><div><h2>原卷 · 第 {question} 题</h2><p>{examReadingGuide(currentExam) ? '已跳到对应原卷页；' : '请翻到原题所在页；'}可用画笔或荧光笔标注原卷，再在答题区记录答案。</p></div><div className="exam-original-actions"><a href={withBasePath(`/api/files/${currentExam.id}#page=${examQuestionPage(currentExam.name, question)}`)} target="_blank" rel="noreferrer">单独打开原题 ↗</a><Button variant="secondary" onClick={() => document.getElementById('exam-answer-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>填写第 {question} 题答案 ↓</Button></div></div><PdfPreview key={`${currentExam.id}-${question}`} url={withBasePath(`/api/files/${currentExam.id}`)} initialPage={examQuestionPage(currentExam.name, question)} name={currentExam.name} landmarks={examReadingGuide(currentExam)?.landmarks} annotations={currentRecord.annotations} onAnnotationsChange={(page, strokes) => update(currentExam.id, record => ({ ...record, annotations: { ...record.annotations, [String(page)]: strokes } }))}/></div>
       <div className="exam-answer-panel" id="exam-answer-panel"><div className="exam-answer-heading"><h2>答题区</h2><span role="status">{saving[currentExam.id] ? '正在保存…' : errors[currentExam.id] ? '保存失败' : saved[currentExam.id] === JSON.stringify(currentRecord) ? '已保存本机' : '待保存'}</span></div>
         <div className="exam-question-select"><label htmlFor="exam-question-select">原卷题号</label><div><Button size="icon" variant="secondary" disabled={questionIndex <= 0} aria-label="上一题" onClick={() => setQuestion(allowedQuestions[questionIndex - 1])}><ChevronLeft size={16}/></Button><select id="exam-question-select" value={question} onChange={event => setQuestion(Number(event.target.value))}>{groups.filter(group => allowedQuestions.some(number => number >= group.from && number <= group.to)).map(group => <optgroup key={group.label} label={group.label}>{Array.from({ length: group.to - group.from + 1 }, (_, index) => group.from + index).filter(number => allowedQuestions.includes(number)).map(number => <option key={number} value={number}>第 {number} 题{currentRecord.marks[String(number)] === 'wrong' ? ' · 待巩固' : ''}</option>)}</optgroup>)}</select><Button size="icon" variant="secondary" disabled={questionIndex === allowedQuestions.length - 1} aria-label="下一题" onClick={() => setQuestion(allowedQuestions[questionIndex + 1])}><ChevronRight size={16}/></Button></div></div>
         <QuestionStudyControls question={{engine:'pdf',questionId:String(question),materialId:currentExam.id}}/><div className="exam-answer-edit"><label htmlFor="exam-answer">我的作答 · 第 {question} 题</label><textarea id="exam-answer" className="exam-lined-answer" rows={6} value={currentRecord.answers[String(question)] ?? ''} placeholder="在原卷找到完整题目后，在这里写下答案；有多个小问时可分行作答。" onChange={event => update(currentExam.id, record => ({ ...record, answers: { ...record.answers, [String(question)]: event.target.value } }))}/><p>原卷中的作答横线仍以 PDF 显示。</p>

@@ -1,10 +1,11 @@
+import { withWorkspace } from '@/lib/workspace-scope';
 import { readFile } from 'node:fs/promises';
 import { requirePrivateAccess } from '@/lib/private-access';
 import { checkOrigin, errorResponse } from '@/lib/server';
 import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
-export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleGET(request: Request, context: { params: Promise<{ id: string }> }) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request); const { id } = await context.params;
@@ -19,3 +20,5 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     return new Response(new Uint8Array(bytes), { headers: { 'Content-Type': `image/${/^jpe?g$/i.test(match[1]) ? 'jpeg' : match[1].toLowerCase()}`, 'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff' } });
   } catch (error) { return errorResponse(error); }
 }
+
+export const GET = withWorkspace(handleGET);

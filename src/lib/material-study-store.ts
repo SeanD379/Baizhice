@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { db } from './db';
+import { db, getDataDir } from './db';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { deepSeekConfig,generateWithDeepSeek } from './deepseek';
 import { generationSources } from './generation-store';
 import { hashContent,validateOutput,type SourcePage } from './generation';
 import { annotationLocation,listMaterialAnnotations,readAnnotationImage } from './material-annotation-store';
 import { conceptReferences,knowledgeBatches,mergeStudyCandidates,normalizeQuote,questionOnlyContent,studyQuestionBody,studyPresetSchema,studyDestination,type StudyDestination,validateSupplementOutput,type MaterialStudyTask,type StudyCandidate,type StudyPreset,type StudyTarget } from './material-study';
 import { validateAutomaticStudy } from './material-study-automatic';
-import { adoptStudyQuestions, questionBankSourceHash } from './question-bank-store';
+import { adoptStudyQuestions, generateOriginalQuestionAnswer, questionBankSourceHash } from './question-bank-store';
 import type { OriginalQuestion } from './question-bank-types';
 import { adoptNotebookSections,NotebookConflict } from './notebook-store';
 import type { Section, Reference } from './types';
@@ -18,13 +19,18 @@ import { readExamProtection } from './exam-protection';
 import { aiAssistantText } from './ai-assistant';
 import { questionRefKey } from './practice-hub';
 
-type TaskContent = Omit<MaterialStudyTask,'id'|'courseId'|'revision'|'createdAt'|'updatedAt'|'stale'|'withheld'> & {originalQuestions?:OriginalQuestion[];pages:(SourcePage & {annotationRef?:Reference})[];hashes:Record<string,string>;annotationRevisions:Record<string,number>;annotationSources?:{id:string;refs:Reference[]}[];instructions:{materialId:string;page:number;quote:string;instruction:string;annotationId?:string;anchor?:Reference['anchor'];hasImage?:boolean;recognition?:import('./material-study').AnnotationAnchor['recognition']}[]};
+type TaskContent = Omit<MaterialStudyTask,'id'|'courseId'|'revision'|'createdAt'|'updatedAt'|'stale'|'withheld'|'sourceQuestions'> & {originalQuestions?:OriginalQuestion[];pages:(SourcePage & {annotationRef?:Reference})[];hashes:Record<string,string>;annotationRevisions:Record<string,number>;annotationSources?:{id:string;refs:Reference[]}[];instructions:{materialId:string;page:number;quote:string;instruction:string;annotationId?:string;anchor?:Reference['anchor'];hasImage?:boolean;recognition?:import('./material-study').AnnotationAnchor['recognition']}[]};
 function taskBatches(content:Pick<TaskContent,'pages'|'instructions'>){const batches=knowledgeBatches(content.pages);return content.instructions.some(item=>item.hasImage)?batches.flatMap(batch=>Array.from({length:Math.ceil(batch.length/8)},(_,index)=>batch.slice(index*8,index*8+8))):batches;}
 type TaskRow={id:string;courseId:string;revision:number;content:string;createdAt:Date;updatedAt:Date};
-const runtime=(globalThis as unknown as {materialStudyRuntime?:{active:Map<string,Promise<void>>;queued:Set<string>}}).materialStudyRuntime??={active:new Map(),queued:new Set()};
+const runtime=(globalThis as unknown as {materialStudyRuntime?:{active:Map<string,Promise<void>>;queued:Map<string,()=>Promise<void>>}}).materialStudyRuntime??={active:new Map(),queued:new Map<string,()=>Promise<void>>()};
+const jobKey=(id:string)=>JSON.stringify([getDataDir(),id]);
 const decode=(row:TaskRow):TaskContent=>JSON.parse(row.content);
 const examMessage='所选资料有未交卷考试，请交卷后再整理、审核或收录。已有草稿保留。';
-const publicTask=(row:TaskRow,stale=false,withheld=false):MaterialStudyTask=>{const {pages,hashes,annotationRevisions,annotationSources,originalQuestions,instructions,...content}=decode(row);void pages;void hashes;void annotationRevisions;void annotationSources;void originalQuestions;void instructions;return {...content,error:aiAssistantText(content.error),warnings:content.warnings.map(aiAssistantText),sections:content.sections.map(section=>content.preset==='concepts'||section.generation?.contentOrigin==='ai-supplement'?{...section,refs:conceptReferences(section.title,section.refs)}:section),preset:content.preset??'notes',...(withheld?{sections:[],warnings:[examMessage],error:'',withheld:true}:{}),id:row.id,courseId:row.courseId,revision:row.revision,createdAt:row.createdAt.toISOString(),updatedAt:row.updatedAt.toISOString(),stale};};
+const publicTask=(row:TaskRow,stale=false,withheld=false):MaterialStudyTask=>{
+  const {pages,hashes,annotationRevisions,annotationSources,originalQuestions,instructions,...content}=decode(row);void pages;void hashes;void annotationRevisions;void annotationSources;void instructions;
+  const sourceQuestions=originalQuestions?.map(({id,materialId,number,kind,section,prompt,sources,warnings})=>({id,materialId,number,kind,section,prompt,sources,warnings}));
+  return {...content,...(sourceQuestions?{sourceQuestions}:{}),error:aiAssistantText(content.error),warnings:content.warnings.map(aiAssistantText),sections:content.sections.map(section=>content.preset==='concepts'||section.generation?.contentOrigin==='ai-supplement'?{...section,refs:conceptReferences(section.title,section.refs)}:section),preset:content.preset??'notes',...(withheld?{sections:[],sourceQuestions:[],warnings:[examMessage],error:'',withheld:true}:{}),id:row.id,courseId:row.courseId,revision:row.revision,createdAt:row.createdAt.toISOString(),updatedAt:row.updatedAt.toISOString(),stale};
+};
 async function assertNoExam(courseId:string,materialIds:string[],client?:Parameters<typeof readExamProtection>[1]){const protection=await readExamProtection(courseId,client);if(materialIds.some(id=>protection.withheldMaterials.includes(id)))throw new Error(examMessage);}
 async function taskRow(courseId:string,id:string){const row=await db.materialStudyTask.findFirst({where:{id,courseId}});if(!row)throw new Error('整理任务不存在。');return row;}
 async function persist(row:TaskRow,content:TaskContent){const changed=await db.materialStudyTask.updateMany({where:{id:row.id,revision:row.revision},data:{content:JSON.stringify(content),revision:{increment:1}}});if(changed.count!==1)throw new Error('草稿已在另一页面更新，请刷新后重试。');return db.materialStudyTask.findUniqueOrThrow({where:{id:row.id}});}
@@ -41,7 +47,7 @@ async function sourceChanged(row:TaskRow) {
 async function readTask(initial:TaskRow,protectedIds:string[]) {
   let row=initial,content=decode(row);const id=row.id;
   if(content.materialIds.some(materialId=>protectedIds.includes(materialId)))return publicTask(row,false,true);
-  if(['running','queued'].includes(content.state)&&!runtime.active.has(id)&&!runtime.queued.has(id)){row=await db.materialStudyTask.findUniqueOrThrow({where:{id}});content=decode(row);if(['running','queued'].includes(content.state)&&!runtime.active.has(id)&&!runtime.queued.has(id))row=await persist(row,{...content,state:content.sections.length?'partial':'failed',error:'上次整理已中断，已完成内容保留。点击重试继续未完成批次。'});}
+  if(['running','queued'].includes(content.state)&&!runtime.active.has(jobKey(id))&&!runtime.queued.has(jobKey(id))){row=await db.materialStudyTask.findUniqueOrThrow({where:{id}});content=decode(row);if(['running','queued'].includes(content.state)&&!runtime.active.has(jobKey(id))&&!runtime.queued.has(jobKey(id)))row=await persist(row,{...content,state:content.sections.length?'partial':'failed',error:'上次整理已中断，已完成内容保留。点击重试继续未完成批次。'});}
   return publicTask(row,await sourceChanged(row));
 }
 export async function getMaterialStudyTask(courseId:string,id:string) {
@@ -52,6 +58,19 @@ export async function listMaterialStudyTasks(courseId:string,materialId?:string)
   const [rows,protection]=await Promise.all([db.materialStudyTask.findMany({where:{courseId},orderBy:{updatedAt:'desc'},...(materialId?{}:{take:100})}),readExamProtection(courseId)]);
   return Promise.all(rows.filter(row=>!materialId||decode(row).materialIds.includes(materialId)).slice(0,100).map(row=>readTask(row,protection.withheldMaterials)));
 }
+async function supplementDraftAnswers(row:TaskRow,sections:StudyCandidate[],enabled?:boolean) {
+  if(!enabled)return sections;
+  const result:StudyCandidate[]=[];
+  for(const section of sections){
+    if(!section.question||section.question.answer.trim()||section.review==='adopted'||section.excluded){result.push(section);continue;}
+    await assertNoExam(row.courseId,decode(row).materialIds);
+    let question:OriginalQuestion;
+    try{question=await generateOriginalQuestionAnswer(section.question);}catch(error){question={...section.question,answerGeneration:{state:'failed',error:aiAssistantText(error instanceof Error?error.message:'答案暂未补充成功。')}};}
+    await assertNoExam(row.courseId,decode(row).materialIds);
+    result.push({...section,question,body:studyQuestionBody(question),review:'pending'});
+  }
+  return result;
+}
 async function runTask(id:string) {
   let row=await db.materialStudyTask.findUniqueOrThrow({where:{id}}),content=decode(row);
   try {
@@ -59,35 +78,48 @@ async function runTask(id:string) {
     if(await sourceChanged(row))throw new Error('原文件、识别文字或批注已变化，请重新选择范围；旧草稿保留。');
     row=await persist(row,{...content,state:'running',error:''});content=decode(row);
     const batches=taskBatches(content);
+    const sourceOnly=content.routing==='auto'&&content.materialIds.every(materialId=>{const pages=content.pages.filter(page=>page.materialId===materialId);return questionOnlyContent(pages,parseOriginalQuestions({id:materialId,name:pages[0]?.name??''},pages));});
+    if(content.supplementAnswers&&content.sections.some(section=>section.question&&!section.question.answer.trim()&&section.review!=='adopted'&&!section.excluded)){
+      const sections=await supplementDraftAnswers(row,content.sections,true);
+      if(await sourceChanged(row))throw new Error('生成期间来源变化，已有草稿保留，请重新整理。');
+      row=await persist(row,{...content,sections});content=decode(row);
+    }
     for(let index=content.done;index<batches.length;index++) {
       await assertNoExam(row.courseId,content.materialIds);
       const pages=batches[index],instructions=content.instructions.filter(annotation=>pages.some(page=>page.materialId===annotation.materialId&&page.page===annotation.page)),preset=content.preset??'notes';
       const images=new Map<string,string>();
       for(const instruction of instructions)if(instruction.hasImage&&instruction.annotationId&&!images.has(instruction.annotationId))images.set(instruction.annotationId,`data:image/png;base64,${(await readAnnotationImage(instruction.materialId,instruction.annotationId)).toString('base64')}`);
       const questions=(content.originalQuestions??[]).filter(question=>pages.some(page=>page.materialId===question.materialId&&page.page===question.sources[0]?.page));
-      const generated=content.routing==='auto'?await generateWithDeepSeek(pages,[],'auto',questions):await generateWithDeepSeek(pages,instructions.map(instruction=>({...instruction,...(images.has(instruction.annotationId??'')?{image:images.get(instruction.annotationId!)}:{})})),preset);
+      const generated=sourceOnly?{model:'source',output:{sections:[],questionIds:questions.map(question=>question.id),warnings:[]}}:content.routing==='auto'?await generateWithDeepSeek(pages,[],'auto',questions):await generateWithDeepSeek(pages,instructions.map(instruction=>({...instruction,...(images.has(instruction.annotationId??'')?{image:images.get(instruction.annotationId!)}:{})})),preset);
       await assertNoExam(row.courseId,content.materialIds);
       const checked=content.routing==='auto'?validateAutomaticStudy(generated.output,pages,questions,generated.model,row.id):preset==='concepts'||images.size?validateSupplementOutput(generated.output,(content.annotationSources??[]).filter(annotation=>instructions.some(instruction=>instruction.annotationId===annotation.id)),generated.model,row.id,preset==='concepts'):validateOutput(generated.output,pages,generated.model,row.id);
+      if(sourceOnly)checked.warnings=[];
       if(await sourceChanged(row))throw new Error('生成期间来源变化，未收录新内容。请核对后重新整理。');
-      const sections=checked.sections.map(section=>({...section,id:`${row.id}:${index}:${section.id}`,generation:{...section.generation!,contentOrigin:preset==='concepts'?'ai-supplement' as const:'source' as const},refs:preset==='concepts'||images.size?section.refs:section.refs.map(ref=>{const annotation=content.instructions.find(item=>item.materialId===ref.materialId&&item.page===ref.page&&normalizeQuote(item.quote).includes(normalizeQuote(ref.snippet)));const mapped=pages.find(page=>page.materialId===ref.materialId&&page.page===ref.page) as TaskContent['pages'][number]|undefined;return {...ref,...mapped?.annotationRef,snippet:ref.snippet,location:mapped?.annotationRef?.location??annotationLocation(ref.name),sourceHash:content.hashes[ref.materialId],anchor:mapped?.annotationRef?.anchor??(annotation?annotation.anchor??{quote:annotation.quote}:undefined)};})}));
-      const next=mergeStudyCandidates(content.sections,sections);
+      const sections=checked.sections.map(section=>({...section,review:'pending' as const,id:`${row.id}:${index}:${section.id}`,generation:sourceOnly?undefined:{...section.generation!,contentOrigin:preset==='concepts'?'ai-supplement' as const:'source' as const},refs:preset==='concepts'||images.size?section.refs:section.refs.map(ref=>{const annotation=content.instructions.find(item=>item.materialId===ref.materialId&&item.page===ref.page&&normalizeQuote(item.quote).includes(normalizeQuote(ref.snippet)));const mapped=pages.find(page=>page.materialId===ref.materialId&&page.page===ref.page) as TaskContent['pages'][number]|undefined;return {...ref,...mapped?.annotationRef,snippet:ref.snippet,location:mapped?.annotationRef?.location??annotationLocation(ref.name),sourceHash:content.hashes[ref.materialId],anchor:mapped?.annotationRef?.anchor??(annotation?annotation.anchor??{quote:annotation.quote}:undefined)};})}));
+      const supplemented=await supplementDraftAnswers(row,sections,content.supplementAnswers);
+      if(await sourceChanged(row))throw new Error('生成期间来源变化，已有草稿保留，请重新整理。');
+      const next=mergeStudyCandidates(content.sections,supplemented);
       const conflicts=sections.filter(section=>content.sections.some(old=>normalizeQuote(old.title)===normalizeQuote(section.title)&&normalizeQuote(old.body)!==normalizeQuote(section.body))).map(section=>`“${section.title}”有不同表述，分别保留，请结合出处核对。`);
       content={...content,done:index+1,sections:next,warnings:[...new Set([...content.warnings,...checked.warnings.map(warning=>{for(const page of pages)warning=warning.replace(`${page.name} 第 ${page.page} 页`,`${page.name} ${page.annotationRef?'原文件选定区域':sourceLocation(page.name,page.page)}`);return warning;}),...conflicts])]};
       row=await persist(row,content);
     }
-    await persist(row,{...content,state:content.warnings.some(warning=>/提取不完整|未提取出|未纳入|尚未处理|未被本次候选引用/.test(warning))?'partial':'ready',error:''});
+    const answerFailed=!!content.supplementAnswers&&content.sections.some(section=>section.question?.answerGeneration?.state==='failed'&&section.review!=='adopted'&&!section.excluded);
+    const included=new Set(content.sections.map(section=>section.question?.id)),missingQuestions=sourceOnly&&(content.originalQuestions??[]).some(question=>!included.has(question.id));
+    const incompleteSources=content.warnings.some(warning=>(sourceOnly?/提取不完整|未提取出/:/提取不完整|未提取出|未纳入|尚未处理|未被本次候选引用/).test(warning));
+    await persist(row,{...content,state:answerFailed||missingQuestions||incompleteSources?'partial':'ready',error:answerFailed?'部分答案与解析暂未补充成功，题目已保留，可重试未完成部分。':missingQuestions?'部分已识别题目尚未进入草稿，请重新整理。':''});
   } catch(error) {
     const latest=await db.materialStudyTask.findUnique({where:{id}});
     if(latest)await persist(latest,{...decode(latest),state:decode(latest).sections.length?'partial':'failed',error:error instanceof Error?error.message:'整理失败，已完成草稿保留。'});
   }
 }
-function drainTasks(){for(const id of runtime.queued){if(runtime.active.size>=2)break;runtime.queued.delete(id);const promise=runTask(id).catch(error=>console.error('Material study:',error)).finally(()=>{runtime.active.delete(id);drainTasks();});runtime.active.set(id,promise);}}
-export async function organizeMaterial(input:{courseId:string;mode:'material'|'annotations';routing?:'auto';preset?:StudyPreset;materialIds?:string[];annotationIds?:string[];confirmed:boolean;taskId?:string}) {
+function drainTasks(){for(const [key,run] of runtime.queued){if(runtime.active.size>=2)break;runtime.queued.delete(key);const promise=run().catch(error=>console.error('Material study:',error)).finally(()=>{runtime.active.delete(key);drainTasks();});runtime.active.set(key,promise);}}
+export async function organizeMaterial(input:{courseId:string;mode:'material'|'annotations';routing?:'auto';supplementAnswers?:boolean;preset?:StudyPreset;materialIds?:string[];annotationIds?:string[];confirmed:boolean;taskId?:string}) {
   if(!input.confirmed)throw new Error('请先确认发送所选资料给 AI。');
 
-  if(input.taskId){const row=await taskRow(input.courseId,input.taskId),content=decode(row);await assertNoExam(input.courseId,content.materialIds);if(!deepSeekConfig().configured)throw new Error('尚未配置 DeepSeek，已有草稿保留。');if(await sourceChanged(row))throw new Error('资料或批注变化，请重新选择范围；已有草稿保留。');if(content.state==='ready'||content.done>=content.total&&!content.error)return getMaterialStudyTask(input.courseId,row.id);if(!runtime.active.has(row.id)&&!runtime.queued.has(row.id)){await persist(row,{...content,state:'queued',error:''});runtime.queued.add(row.id);drainTasks();}return getMaterialStudyTask(input.courseId,row.id);}
+  if(input.taskId){const row=await taskRow(input.courseId,input.taskId),content=decode(row),supplementAnswers=input.supplementAnswers??content.supplementAnswers??false;await assertNoExam(input.courseId,content.materialIds);if(supplementAnswers&&content.routing!=='auto')throw new Error('AI 补充答案仅用于整份资料的题目整理。');if(!deepSeekConfig().configured)throw new Error('尚未配置 DeepSeek，已有草稿保留。');if(await sourceChanged(row))throw new Error('资料或批注变化，请重新选择范围；已有草稿保留。');if(runtime.active.has(jobKey(row.id))&&supplementAnswers!==!!content.supplementAnswers){await runtime.active.get(jobKey(row.id));return organizeMaterial(input);}const needsAnswers=supplementAnswers&&content.sections.some(section=>section.question&&!section.question.answer.trim()&&section.review!=='adopted'&&!section.excluded);if(content.state==='ready'&&!needsAnswers)return getMaterialStudyTask(input.courseId,row.id);if(!runtime.active.has(jobKey(row.id))&&!runtime.queued.has(jobKey(row.id))){await persist(row,{...content,supplementAnswers,state:'queued',error:''});runtime.queued.set(jobKey(row.id),AsyncLocalStorage.bind(()=>runTask(row.id)));drainTasks();}return getMaterialStudyTask(input.courseId,row.id);}
   const preset=studyPresetSchema.parse(input.preset??'notes');
   if(input.routing==='auto'&&input.mode!=='material')throw new Error('自动分类整理只用于整份资料。');
+  if(input.supplementAnswers&&input.routing!=='auto')throw new Error('AI 补充答案仅用于整份资料的题目整理。');
   if(preset==='concepts'&&input.mode!=='annotations')throw new Error('补充概念解释只针对所选批注，请先勾选已核对的批注。');
   const allAnnotations=input.mode==='annotations'?await listMaterialAnnotations(input.courseId):[];
   const ids=input.annotationIds??[],annotations=allAnnotations.filter(annotation=>ids.includes(annotation.id));
@@ -118,11 +150,11 @@ export async function organizeMaterial(input:{courseId:string;mode:'material'|'a
   if(!pages.length)throw new Error('没有可整理的文字，请先读取文件或核对框选区域的文字。');
   const batches=taskBatches({pages,instructions}),hashes=Object.fromEntries(materials.map(material=>[material.id,material.hash])),annotationRevisions=Object.fromEntries(annotations.map(annotation=>[annotation.id,annotation.revision]));
   const originalQuestions=input.routing==='auto'?await automaticQuestions(materials):undefined;
-  const fingerprint=hashContent(JSON.stringify({mode:input.mode,preset,...(input.routing?{routing:input.routing,questions:hashContent(JSON.stringify(originalQuestions))}:{}),hashes,pages:pages.map(page=>[page.materialId,page.page,page.extractionHash,hashContent(page.text)]),annotations:annotations.map(annotation=>[annotation.id,annotation.revision]).sort(),...(annotations.some(annotation=>annotation.hasImage)?{vision:1}:{})}));
-  const content:TaskContent={mode:input.mode,preset,...(input.routing?{routing:input.routing,originalQuestions}:{}),materialIds,annotationIds:ids,state:'queued',done:0,total:batches.length,sections:[],warnings:[...sources.unavailable,...annotations.filter(annotation=>annotation.anchor.kind==='region'&&!annotation.hasImage).map(annotation=>`${annotation.name}：包含用户核对后的区域文字，请同时对照原图。`)],error:'',pages,hashes,annotationRevisions,annotationSources:annotations.map(annotation=>({id:annotation.id,refs:annotation.refs})),instructions};
+  const fingerprint=hashContent(JSON.stringify({mode:input.mode,preset,...(input.routing?{routing:input.routing,questions:hashContent(JSON.stringify(originalQuestions))}:{}),...(input.supplementAnswers?{supplementAnswers:true}:{}),hashes,pages:pages.map(page=>[page.materialId,page.page,page.extractionHash,hashContent(page.text)]),annotations:annotations.map(annotation=>[annotation.id,annotation.revision]).sort(),...(annotations.some(annotation=>annotation.hasImage)?{vision:1}:{})}));
+  const content:TaskContent={mode:input.mode,preset,...(input.routing?{routing:input.routing,originalQuestions,supplementAnswers:!!input.supplementAnswers}:{}),materialIds,annotationIds:ids,state:'queued',done:0,total:batches.length,sections:[],warnings:[...sources.unavailable,...annotations.filter(annotation=>annotation.anchor.kind==='region'&&!annotation.hasImage).map(annotation=>`${annotation.name}：包含用户核对后的区域文字，请同时对照原图。`)],error:'',pages,hashes,annotationRevisions,annotationSources:annotations.map(annotation=>({id:annotation.id,refs:annotation.refs})),instructions};
   const row=await db.materialStudyTask.upsert({where:{courseId_fingerprint:{courseId:input.courseId,fingerprint}},create:{id:randomUUID(),courseId:input.courseId,fingerprint,content:JSON.stringify(content)},update:{}});
   const old=decode(row);
-  if((old.state==='queued'||old.state==='running')&&!runtime.active.has(row.id)&&!runtime.queued.has(row.id)){runtime.queued.add(row.id);drainTasks();}
+  if((old.state==='queued'||old.state==='running')&&!runtime.active.has(jobKey(row.id))&&!runtime.queued.has(jobKey(row.id))){runtime.queued.set(jobKey(row.id),AsyncLocalStorage.bind(()=>runTask(row.id)));drainTasks();}
   return getMaterialStudyTask(input.courseId,row.id);
 }
 export async function reviseMaterialStudy(input:{courseId:string;taskId:string;revision:number;edits?:{id:string;title:string;body:string;excluded?:boolean;destination?:StudyDestination;question?:Pick<OriginalQuestion,'prompt'|'answer'|'explanation'>}[];approveIds?:string[]}) {

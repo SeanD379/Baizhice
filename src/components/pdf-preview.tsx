@@ -1,4 +1,5 @@
 'use client';
+import { withBasePath } from '@/lib/base-path';
 import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Minus, Plus, LoaderCircle, RotateCw, FileWarning, Maximize, Minimize, MousePointer2, Pencil, Highlighter, Eraser, Undo2, Palette } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
@@ -50,8 +51,8 @@ export default function PdfPreview({ url, initialPage = 1, name = '原始文件'
     (async () => {
       try {
         const pdfjs = await import('pdfjs-dist');
-        pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
-        const loadingTask = pdfjs.getDocument({ url }); task = loadingTask;
+        pdfjs.GlobalWorkerOptions.workerSrc = withBasePath('/pdf.worker.min.mjs');
+        const loadingTask = pdfjs.getDocument({ url: withBasePath(url) }); task = loadingTask;
         const doc = await loadingTask.promise;
         if (disposed) return;
         setPages(doc.numPages);

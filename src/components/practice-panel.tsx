@@ -1,4 +1,5 @@
 'use client';
+import { workspaceFetch } from '@/lib/workspace-storage';
 import { useEffect, useState } from 'react';
 import { BookOpen, ListChecks, LoaderCircle } from 'lucide-react';
 import { Button } from './ui/button';
@@ -14,15 +15,15 @@ export function PracticePanel({courseId,materials,version,onRead,onSource,genera
   const sourceKey=materials.map(m=>`${m.id}:${m.excluded}:${m.status}`).join(',');
   useEffect(()=>{
     let active=true;setData(null);setError('');setSelected([]);
-    if(version)void fetch(`/api/practice?courseId=${encodeURIComponent(courseId)}&versionId=${encodeURIComponent(version.id)}`,{cache:'no-store'}).then(async r=>{const result=await r.json();if(!r.ok)throw new Error(result.error);if(expectedScope&&result.scope!==expectedScope||expectedSetId&&result.set?.id!==expectedSetId)throw Error('题组或来源已更新，旧答案保留在练习记录中；请重新选择当前题组。');if(active)setData(result);}).catch(e=>{if(active)setError(e.message);});
+    if(version)void workspaceFetch(`/api/practice?courseId=${encodeURIComponent(courseId)}&versionId=${encodeURIComponent(version.id)}`,{cache:'no-store'}).then(async r=>{const result=await r.json();if(!r.ok)throw new Error(result.error);if(expectedScope&&result.scope!==expectedScope||expectedSetId&&result.set?.id!==expectedSetId)throw Error('题组或来源已更新，旧答案保留在练习记录中；请重新选择当前题组。');if(active)setData(result);}).catch(e=>{if(active)setError(e.message);});
     return()=>{active=false;};
   },[courseId,version?.id,sourceKey,expectedScope,expectedSetId]);
   async function action(body:object){
     setBusy(true);setError('');
     try {
-      const response=await fetch('/api/practice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,courseId,versionId:version?.id})});
+      const response=await workspaceFetch('/api/practice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,courseId,versionId:version?.id})});
       const result=await response.json();if(!response.ok)throw new Error(result.error);
-      const refresh=await fetch(`/api/practice?courseId=${encodeURIComponent(courseId)}&versionId=${encodeURIComponent(version!.id)}`,{cache:'no-store'});
+      const refresh=await workspaceFetch(`/api/practice?courseId=${encodeURIComponent(courseId)}&versionId=${encodeURIComponent(version!.id)}`,{cache:'no-store'});
       const next=await refresh.json();if(!refresh.ok)throw new Error(next.error);setData(next);
     }catch(e){setError(e instanceof Error?e.message:'操作失败，请重试。');}finally{setBusy(false);}
   }

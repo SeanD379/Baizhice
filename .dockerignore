@@ -4,6 +4,8 @@ node_modules
 .git
 .env*
 data
+deploy/.env*
+deploy/data
 tmp
 test-results
 docs/*.png

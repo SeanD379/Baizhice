@@ -1,4 +1,5 @@
 'use client';
+import { workspaceFetch } from '@/lib/workspace-storage';
 import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, LoaderCircle, Maximize, Minimize, Minus, Plus, RotateCw } from 'lucide-react';
 import { Button } from './ui/button';
@@ -27,7 +28,7 @@ export default function WordPreview({ url, name, studyAnnotations }: { url: stri
     setLoaded(false); setError(''); setPage(1); setZoom(1);
     void (async () => {
       try {
-        const response = await fetch(url, {signal:controller.signal});
+        const response = await workspaceFetch(url, {signal:controller.signal});
         if (!response.ok) throw new Error('原文件暂时无法读取。');
         const bytes = await response.arrayBuffer();
         const { renderAsync } = await import('docx-preview');

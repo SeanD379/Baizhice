@@ -15,7 +15,8 @@ import React, {
   type PointerEvent,
   type ReactNode
 } from 'react';
-import { animate, useMotionValue, useMotionValueEvent, useReducedMotion } from 'motion/react';
+import { animate, useMotionValue, useMotionValueEvent } from 'motion/react';
+import { useAppReducedMotion as useReducedMotion } from '../user-preferences';
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react';
 import {
   ArrowDown01Icon,
@@ -61,6 +62,7 @@ export interface PromptBarSendDetail {
 }
 
 export interface PromptBarProps {
+  sendShortcut?: 'enter' | 'mod-enter';
   value?: string;
   onValueChange?: (value: string) => void;
   attachmentNames?: string[];
@@ -226,6 +228,7 @@ const PromptBar: React.FC<PromptBarProps> = ({
   attachmentNames,
   onRemoveAttachment,
   disabled = false,
+  sendShortcut = 'enter',
   inputLabel = 'Prompt',
   hint,
   placeholder = 'Ask anything',
@@ -570,7 +573,7 @@ const PromptBar: React.FC<PromptBarProps> = ({
       }
       return;
     }
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && (sendShortcut === 'enter' || e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       send();
     }

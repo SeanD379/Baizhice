@@ -47,7 +47,7 @@ def backup(source, target):
             relative = item.relative_to(source)
             if item.is_symlink():
                 raise ValueError('数据目录不能包含符号链接')
-            if item.is_file() and relative.parts[0] != 'backups' and not item.name.startswith('workbench.db') and not item.name.endswith('.tmp'):
+            if item.is_file() and relative.parts[0] != 'backups' and relative != Path('backup-manifest.json') and not item.name.startswith('workbench.db') and not item.name.endswith('.tmp'):
                 destination = snapshot / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(item, destination)

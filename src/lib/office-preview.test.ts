@@ -8,7 +8,7 @@ vi.mock('node:child_process', async () => {
   const { promisify } = await import('node:util');
   return { execFile: Object.assign(vi.fn(), { [promisify.custom]: mock.convert }) };
 });
-vi.mock('./db', async () => ({ dataDir: await (await import('node:fs/promises')).mkdtemp((await import('node:path')).join((await import('node:os')).tmpdir(), 'lms-preview-')) }));
+vi.mock('./db', async () => { const dataDir = await (await import('node:fs/promises')).mkdtemp((await import('node:path')).join((await import('node:os')).tmpdir(), 'lms-preview-')); return { dataDir, getDataDir: () => dataDir }; });
 import { dataDir } from './db';
 import { readOfficePreview } from './office-preview';
 

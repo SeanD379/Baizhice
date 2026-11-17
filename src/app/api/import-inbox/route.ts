@@ -1,14 +1,15 @@
+import { withWorkspace } from '@/lib/workspace-scope';
 import { requirePrivateAccess } from '@/lib/private-access';
 import { NextResponse } from 'next/server';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { db, dataDir } from '@/lib/db';
+import { db, getDataDir } from '@/lib/db';
 import { checkOrigin, digest, errorResponse } from '@/lib/server';
 import { identifyUpload, MAX_UPLOAD_BYTES } from '@/lib/upload-format';
 
 export const runtime = 'nodejs';
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     const items = await db.inboxItem.findMany({ orderBy: { createdAt: 'desc' }, select: { id: true, name: true, mime: true, size: true, source: true, courseId: true, createdAt: true } });
@@ -16,7 +17,7 @@ export async function GET(request: Request) {
   } catch (error) { return errorResponse(error); }
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
     if (typeof courseId !== 'string' || !await db.course.findUnique({ where: { id: courseId } })) throw new Error('课程不存在。');
     const bytes = Buffer.from(await file.arrayBuffer());
     const { mime, extension } = identifyUpload(bytes, file.name);
-    const directory = path.join(dataDir, 'import-inbox');
+    const directory = path.join(getDataDir(), 'import-inbox');
     await mkdir(directory, { recursive: true });
     const filePath = path.join(directory, randomUUID());
     await writeFile(filePath, bytes);
@@ -37,3 +38,6 @@ export async function POST(request: Request) {
     } catch (error) { await unlink(filePath).catch(() => {}); throw error; }
   } catch (error) { return errorResponse(error); }
 }
+
+export const GET = withWorkspace(handleGET);
+export const POST = withWorkspace(handlePOST);

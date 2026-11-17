@@ -1,4 +1,5 @@
 'use client';
+import { workspaceFetch } from '@/lib/workspace-storage';
 
 import { type ChangeEvent, type DragEvent, type FormEvent, useEffect, useRef, useState } from 'react';
 import { BookOpen, Bot, Copy, FileText, History, ListChecks, LoaderCircle, PencilLine, Plus, UserRound } from 'lucide-react';
@@ -7,6 +8,7 @@ import { Markdown } from './markdown';
 import { CaptureButton } from './notebook-context';
 import PromptBar from './react-bits/PromptBar';
 import { ChatThinking, type ChatRun } from './chat-thinking';
+import { useAppReducedMotion, useUserPreferences } from './user-preferences';
 import type { ChatAttachment, ChatMessage, ConversationSummary } from '@/lib/types';
 
 type LearningHomeProps = {
@@ -17,6 +19,7 @@ type LearningHomeProps = {
   onSelectConversation: (id: string | null) => void;
   onOpenHistory: () => void;
   historyOpen?: boolean;
+  onPendingChange?: (pending: boolean) => void;
 };
 
 const quickActions = [
@@ -28,7 +31,7 @@ const chatSources = [{ key: 'files', name: '添加资料', description: '从本�
 const noChatPickers: [] = [];
 
 async function readResponse<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+  const response = await workspaceFetch(url, init);
   const body = await response.json().catch(() => ({ error: '服务暂时不可用，请稍后重试。' }));
   if (!response.ok) throw new Error(body.error ?? '操作失败，请稍后重试。');
   return body;
@@ -43,7 +46,9 @@ function MessageAttachments({ attachments, label }: { attachments: ChatAttachmen
   return <div className="chat-message-files"><span>{label}</span>{attachments.map(file => <span key={`${file.materialId ?? file.name}-${file.name}`}><FileText size={13}/>{file.name}</span>)}</div>;
 }
 
-export function LearningHome({ courseId, initialConversationId, conversations, onConversationsChange, onSelectConversation, onOpenHistory, historyOpen = false }: LearningHomeProps) {
+export function LearningHome({ courseId, initialConversationId, conversations, onConversationsChange, onSelectConversation, onOpenHistory, historyOpen = false, onPendingChange }: LearningHomeProps) {
+  const { preferences } = useUserPreferences();
+  const reducedMotion = useAppReducedMotion();
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
@@ -62,6 +67,8 @@ export function LearningHome({ courseId, initialConversationId, conversations, o
   const composer = useRef<HTMLFormElement>(null);
   const editInput = useRef<HTMLTextAreaElement>(null);
   const threadEnd = useRef<HTMLDivElement>(null);
+  const pending = !!(draft.trim() || files.length || editingId || busy);
+  useEffect(() => { onPendingChange?.(pending); return () => onPendingChange?.(false); }, [pending, onPendingChange]);
 
   useEffect(() => {
     if (chatContext.current.courseId !== courseId || chatContext.current.conversationId !== initialConversationId) {
@@ -84,7 +91,7 @@ export function LearningHome({ courseId, initialConversationId, conversations, o
   }, [courseId, initialConversationId, onConversationsChange]);
 
   useEffect(() => () => { requestSequence.current++; }, []);
-  useEffect(() => { if (typeof threadEnd.current?.scrollIntoView === 'function') threadEnd.current.scrollIntoView({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'end' }); }, [messages, busy, runs.at(-1)?.steps.length]);
+  useEffect(() => { if (typeof threadEnd.current?.scrollIntoView === 'function') threadEnd.current.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'end' }); }, [messages, busy, runs.at(-1)?.steps.length, reducedMotion]);
   useEffect(() => { if (!copiedId) return; const timer = setTimeout(() => setCopiedId(null), 2000); return () => clearTimeout(timer); }, [copiedId]);
   useEffect(() => {
     const dismissActions = (event: PointerEvent) => {
@@ -100,7 +107,8 @@ export function LearningHome({ courseId, initialConversationId, conversations, o
 
   function addFiles(nextFiles: FileList | File[]) {
     if (busy || editingId || loadingHistory) return;
-    setFiles(current => [...current, ...Array.from(nextFiles).filter(file => !current.some(existing => existing.name === file.name && existing.size === file.size))]);
+    const selected = Array.from(nextFiles);
+    setFiles(current => [...current, ...selected.filter(file => !current.some(existing => existing.name === file.name && existing.size === file.size))]);
     setError('');
   }
 
@@ -263,13 +271,13 @@ export function LearningHome({ courseId, initialConversationId, conversations, o
 
     {error && <p className="chat-error" role="alert">{error}</p>}
     <form ref={composer} className={`chat-composer chat-composer-redesign ${dragging ? 'is-dragging' : ''}`} onSubmit={submit} onDragOver={event => { event.preventDefault(); if (!busy && !editingId && !loadingHistory) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={handleDrop}>
-      <PromptBar value={draft} onValueChange={setDraft} attachmentNames={files.map(file => file.name)}
+      <PromptBar value={draft} onValueChange={setDraft} attachmentNames={files.map(file => file.name)} sendShortcut={preferences.sendShortcut}
         onRemoveAttachment={index => setFiles(current => current.filter((_, i) => i !== index))}
         disabled={busy || !!editingId || loadingHistory} busy={busy} onSend={() => void submit()} onAttach={() => fileInput.current?.click()}
         sources={chatSources} commands={noChatPickers} models={noChatPickers} efforts={noChatPickers}
         width={720} radius={16} background="var(--chat-input)" color="var(--chat-ink)" menuBackground="var(--chat-menu)"
         inputLabel="学习问题或资料处理要求" placeholder={files.length ? '告诉 AI 如何处理这些资料…' : '问 AI、粘贴内容，或把资料拖到这里…'}
-        hint={busy ? '正在处理，请稍候…' : editingId ? '先完成或取消上方的修改' : files.length ? `已添加 ${files.length} 份资料` : 'Enter 发送 · Shift + Enter 换行'}/>
+        hint={busy ? '正在处理，请稍候…' : editingId ? '先完成或取消上方的修改' : files.length ? `已添加 ${files.length} 份资料` : preferences.sendShortcut === 'mod-enter' ? 'Ctrl / ⌘ + Enter 发送 · Enter 换行' : 'Enter 发送 · Shift + Enter 换行'}/>
       <input ref={fileInput} type="file" hidden multiple accept=".pdf,.png,.jpg,.jpeg,.docx,.pptx,.txt" onChange={handleSelect}/>
       <p className="chat-privacy"><span>点击发送后，问题和你选择的资料会提交给 AI 助手</span></p>
     </form>

@@ -4,10 +4,9 @@ import { copyFile, mkdir, mkdtemp, readFile, rename, rm, stat, unlink } from 'no
 import { platform } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { dataDir } from './db';
+import { getDataDir } from './db';
 
 const exec = promisify(execFile);
-const directory = path.join(dataDir, 'previews');
 const script = path.join(process.cwd(), 'scripts', 'preview-office.ps1');
 const globalPreview = globalThis as unknown as { officePreviewQueue?: { jobs: Map<string, Promise<Buffer>>; tail: Promise<unknown> } };
 const queue = globalPreview.officePreviewQueue ??= { jobs: new Map(), tail: Promise.resolve() };
@@ -30,12 +29,13 @@ async function cachedPdf(filePath: string) {
 
 /** Local Windows PowerPoint export; the browser renders DOCX directly. */
 export async function readOfficePreview(material: { id: string; name: string; filePath: string }): Promise<Buffer> {
+  const directory = path.join(getDataDir(), 'previews');
   if (!/\.pptx$/i.test(material.name)) throw new OfficePreviewError('这份文件不使用幻灯片转换，请查看原文件预览或下载原文件。', 415);
   if (platform() !== 'win32') throw new OfficePreviewError('当前服务器未配置 PowerPoint 原文件预览转换器，请下载原文件查看。', 503);
   let source;
   try { source = await stat(material.filePath); }
   catch { throw new OfficePreviewError('原文件不可访问，请重新上传。', 404); }
-  const fingerprint = createHash('sha256').update(JSON.stringify(['powerpoint-pdf-1', material.id, material.filePath, source.size, source.mtimeMs])).digest('hex');
+  const fingerprint = createHash('sha256').update(JSON.stringify(['powerpoint-pdf-1', directory, material.id, material.filePath, source.size, source.mtimeMs])).digest('hex');
   const existing = queue.jobs.get(fingerprint);
   if (existing) return existing;
   const destination = path.join(directory, `${fingerprint}.pdf`);

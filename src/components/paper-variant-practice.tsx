@@ -1,4 +1,5 @@
 'use client';
+import { withBasePath } from '@/lib/base-path';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, FileText, LoaderCircle, Play, Sparkles } from 'lucide-react';
 import type { Material } from '@/lib/types';
@@ -12,7 +13,7 @@ import { originalRequest } from './use-original-session';
 
 type Props = { courseId: string; materials: Material[]; location: PracticeLocation; onOpen: (location: PracticeLocation) => void | Promise<void>; onUpload: () => void };
 function QuestionPreview({ question }: { question: OriginalQuestion }) {
-  return <><div className="hub-variant-topic">{question.topics.join(' · ') || '知识点待标注'}</div>{question.context && <details className="hub-variant-material"><summary>共同材料 · 查看全文</summary><Markdown text={question.context}/></details>}<Markdown text={question.prompt}/>{question.options.length > 0 && <div className="hub-variant-options">{question.options.map(option => <div key={option.label}><strong>{option.label}.</strong><Markdown text={option.text}/></div>)}</div>}{question.media?.map((media, i) => <figure className="hub-variant-media" key={`${media.url}:${i}`}><img src={media.url} alt={media.label}/>{media.label && <figcaption>{media.label}</figcaption>}</figure>)}</>;
+  return <><div className="hub-variant-topic">{question.topics.join(' · ') || '知识点待标注'}</div>{question.context && <details className="hub-variant-material"><summary>共同材料 · 查看全文</summary><Markdown text={question.context}/></details>}<Markdown text={question.prompt}/>{question.options.length > 0 && <div className="hub-variant-options">{question.options.map(option => <div key={option.label}><strong>{option.label}.</strong><Markdown text={option.text}/></div>)}</div>}{question.media?.map((media, i) => <figure className="hub-variant-media" key={`${media.url}:${i}`}><img src={withBasePath(media.url)} alt={media.label}/>{media.label && <figcaption>{media.label}</figcaption>}</figure>)}</>;
 }
 
 export function PaperVariantPractice({ courseId, materials, location, onOpen, onUpload }: Props) {

@@ -4,7 +4,7 @@ import path from 'node:path';
 const materialDb = vi.hoisted(() => ({ findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), delete: vi.fn() }));
 const folderDb = vi.hoisted(() => ({ findUnique: vi.fn() }));
 const files = vi.hoisted(() => ({ readdir: vi.fn(), readFile: vi.fn(), unlink: vi.fn() }));
-vi.mock('@/lib/db', () => ({ db: { material: materialDb, folder: folderDb }, dataDir: 'C:\\test\\data' }));
+vi.mock('@/lib/db', () => ({ db: { material: materialDb, folder: folderDb }, getDataDir:()=>'C:\\test\\data',dataDir:'C:\\test\\data' }));
 vi.mock('node:fs/promises', () => files);
 vi.mock('@/lib/extraction', () => ({ isExtracting: vi.fn(() => false) }));
 

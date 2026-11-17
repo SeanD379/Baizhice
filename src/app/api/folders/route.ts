@@ -1,3 +1,4 @@
+import { withWorkspace } from '@/lib/workspace-scope';
 import { requirePrivateAccess } from '@/lib/private-access';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -8,7 +9,7 @@ export const runtime = 'nodejs';
 
 const name = z.string().trim().min(1).max(60);
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -23,7 +24,7 @@ export async function POST(request: Request) {
   } catch (error) { return errorResponse(error); }
 }
 
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -35,7 +36,7 @@ export async function PATCH(request: Request) {
   } catch (error) { return errorResponse(error); }
 }
 
-export async function DELETE(request: Request) {
+async function handleDELETE(request: Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -45,3 +46,7 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ deleted: true });
   } catch (error) { return errorResponse(error); }
 }
+
+export const POST = withWorkspace(handlePOST);
+export const PATCH = withWorkspace(handlePATCH);
+export const DELETE = withWorkspace(handleDELETE);

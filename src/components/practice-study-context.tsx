@@ -1,4 +1,5 @@
 'use client';
+import { workspaceFetch } from '@/lib/workspace-storage';
 import { createContext, useCallback, useContext, useEffect, useId, useState, type ReactNode } from 'react';
 import { Bookmark, Check, LoaderCircle, PencilLine, RotateCw } from 'lucide-react';
 import { questionRefKey, type QuestionRef, type QuestionStudyState } from '@/lib/practice-hub';
@@ -10,13 +11,13 @@ const Study = createContext<StudyContext | null>(null);
 export function PracticeStudyProvider({ courseId, children }: { courseId: string; children: ReactNode }) {
   const [states, setStates] = useState<QuestionStudyState[]>([]), [loading, setLoading] = useState(true), [error, setError] = useState('');
   const reload = useCallback(async () => {
-    const response = await fetch(`/api/practice-state?courseId=${encodeURIComponent(courseId)}`, { cache: 'no-store' });
+    const response = await workspaceFetch(`/api/practice-state?courseId=${encodeURIComponent(courseId)}`, { cache: 'no-store' });
     const result = await response.json(); if (!response.ok) throw Error(result.error || '收藏和复盘笔记读取失败，请重试。');
     setStates(result.states); setError('');
   }, [courseId]);
   useEffect(() => { let alive = true; setLoading(true); void reload().catch(e => { if (alive) setError(e.message); }).finally(() => { if (alive) setLoading(false); }); return () => { alive = false; }; }, [reload]);
   async function change(refs: QuestionRef[], changes: Changes, revision?: number) {
-    const response = await fetch('/api/practice-state', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ courseId, refs, changes, ...(revision !== undefined ? { revision } : {}) }) });
+    const response = await workspaceFetch('/api/practice-state', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ courseId, refs, changes, ...(revision !== undefined ? { revision } : {}) }) });
     const result = await response.json(); if (!response.ok) throw Error(result.error || '保存失败，请保留文字并重试。');
     setStates(result.states); setError('');
   }

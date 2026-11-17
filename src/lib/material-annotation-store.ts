@@ -3,14 +3,14 @@ import { access, mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
-import { db, dataDir } from './db';
+import { db, getDataDir } from './db';
 import { generationSources } from './generation-store';
 import { normalizeQuote, type AnnotationAnchor, type MaterialAnnotation } from './material-study';
 import type { Reference } from './types';
 import type { SourcePage } from './generation';
 
 const exec = promisify(execFile);
-const imageDirectory = path.join(dataDir, 'annotation-images');
+const imageDirectory = () => path.join(getDataDir(), 'annotation-images');
 const imageBytes = (image:string) => {
   if (!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(image)) throw new Error('批注截图格式无效。');
   const bytes = Buffer.from(image.slice(image.indexOf(',')+1), 'base64');
@@ -43,12 +43,12 @@ export async function annotationMaterial(materialId:string) {
 export async function listMaterialAnnotations(courseId:string,materialId?:string) {
   if(!await db.course.findUnique({where:{id:courseId}}))throw new Error('课程不存在。');
   const [rows,materials,sources]=await Promise.all([db.materialAnnotation.findMany({where:{courseId,...(materialId?{materialId}:{})},orderBy:{createdAt:'asc'}}),db.material.findMany({where:{courseId,...(materialId?{id:materialId}:{})}}),generationSources(courseId)]);
-  return Promise.all(rows.map(async row=>{const content=JSON.parse(row.content),material=materials.find(item=>item.id===row.materialId),hasImage=await access(path.join(imageDirectory,`${row.id}.png`)).then(()=>true,()=>false);return {...content,id:row.id,courseId,materialId:row.materialId,sourceHash:row.sourceHash,revision:row.revision,createdAt:row.createdAt.toISOString(),updatedAt:row.updatedAt.toISOString(),hasImage,stale:!material||material.hash!==row.sourceHash||material.excluded||!!material.conflictResolution||material.status==='review'||(!!content.extractionHash&&!sources.pages.some(page=>page.materialId===row.materialId&&page.extractionHash===content.extractionHash))} as MaterialAnnotation;}));
+  return Promise.all(rows.map(async row=>{const content=JSON.parse(row.content),material=materials.find(item=>item.id===row.materialId),hasImage=await access(path.join(imageDirectory(),`${row.id}.png`)).then(()=>true,()=>false);return {...content,id:row.id,courseId,materialId:row.materialId,sourceHash:row.sourceHash,revision:row.revision,createdAt:row.createdAt.toISOString(),updatedAt:row.updatedAt.toISOString(),hasImage,stale:!material||material.hash!==row.sourceHash||material.excluded||!!material.conflictResolution||material.status==='review'||(!!content.extractionHash&&!sources.pages.some(page=>page.materialId===row.materialId&&page.extractionHash===content.extractionHash))} as MaterialAnnotation;}));
 }
 export async function saveMaterialAnnotation(materialId:string,input:{anchor:AnnotationAnchor;instruction:string;confirmedText:boolean;image?:string;id?:string;revision?:number}) {
   const material=await annotationMaterial(materialId),png=input.image?imageBytes(input.image):undefined;
   const sources=await generationSources(material.courseId),pages=sources.pages.filter(page=>page.materialId===material.id);
-  const hasImage=!!png||!!input.id&&await access(path.join(imageDirectory,`${input.id}.png`)).then(()=>true,()=>false);
+  const hasImage=!!png||!!input.id&&await access(path.join(imageDirectory(),`${input.id}.png`)).then(()=>true,()=>false);
   const refs=selectedReferences(material,input.anchor,pages,input.confirmedText,hasImage),id=input.id??randomUUID();
   const content={name:material.name,anchor:input.anchor,refs,instruction:input.instruction,confirmedText:input.confirmedText,extractionHash:pages[0]?.extractionHash??''};
   if(input.id) {
@@ -57,20 +57,20 @@ export async function saveMaterialAnnotation(materialId:string,input:{anchor:Ann
     const changed=await db.materialAnnotation.updateMany({where:{id,materialId,revision:input.revision},data:{content:JSON.stringify(content),revision:{increment:1}}});
     if(changed.count!==1)throw new Error('批注已在另一页面修改，请刷新后重试。');
   } else await db.materialAnnotation.create({data:{id,courseId:material.courseId,materialId,sourceHash:material.hash,content:JSON.stringify(content)}});
-  if(png){await mkdir(imageDirectory,{recursive:true});await writeFile(path.join(imageDirectory,`${id}.png`),png);}
+  if(png){await mkdir(imageDirectory(),{recursive:true});await writeFile(path.join(imageDirectory(),`${id}.png`),png);}
   return (await listMaterialAnnotations(material.courseId)).find(item=>item.id===id)!;
 }
 export async function deleteMaterialAnnotation(materialId:string,id:string,revision:number) {
   const changed=await db.materialAnnotation.deleteMany({where:{id,materialId,revision}});
   if(changed.count!==1)throw new Error('批注已变化，请刷新后重试。');
-  await unlink(path.join(imageDirectory,`${id}.png`)).catch(error=>{if(error.code!=='ENOENT')throw error;});
+  await unlink(path.join(imageDirectory(),`${id}.png`)).catch(error=>{if(error.code!=='ENOENT')throw error;});
 }
 export async function readAnnotationImage(materialId:string,id:string) {
   if(!/^[a-f0-9-]{36}$/.test(id)||!await db.materialAnnotation.findFirst({where:{id,materialId}}))throw new Error('批注截图不存在。');
-  return readFile(path.join(imageDirectory,`${id}.png`));
+  return readFile(path.join(imageDirectory(),`${id}.png`));
 }
 export async function recognizeAnnotationImage(image:string) {
-  const bytes=imageBytes(image),id=randomUUID(),directory=path.join(dataDir,'annotation-ocr');
+  const bytes=imageBytes(image),id=randomUUID(),directory=path.join(getDataDir(),'annotation-ocr');
   await mkdir(directory,{recursive:true});const file=path.join(directory,`${id}.png`);
   await writeFile(file,bytes);
   try {const {stdout}=await exec(process.execPath,[path.join(process.cwd(),'scripts','recognize-annotation.mjs'),file],{cwd:process.cwd(),timeout:45000,maxBuffer:1024*1024,windowsHide:true});return JSON.parse(stdout) as {text:string;confidence:number};}

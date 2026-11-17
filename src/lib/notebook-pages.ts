@@ -31,15 +31,16 @@ export function readingPieces(page: KnowledgePage): ReadingPiece[] {
   }
   return result.map((piece, index) => ({ ...piece, index }));
 }
-export function buildLeafSheets(document: NotebookDocument, width: number, heights: Record<string, number>, height = 520): LeafSheet[] {
+export function buildLeafSheets(document: NotebookDocument, width: number, heights: Record<string, number>, height: number | ((page: KnowledgePage) => number) = 520): LeafSheet[] {
   const sheets: LeafSheet[] = [];
   for (const page of document.pages) {
+    const availableHeight = typeof height === 'function' ? height(page) : height;
     const pieces = readingPieces(page); let current: ReadingPiece[] = [], used = 0, continuation = 0;
     const flush = () => { sheets.push({ id: `${page.id}:${current[0]?.index ?? 0}`, page, pieces: current, continuation: continuation++ }); current = []; used = 0; };
     const sizes = pieces.map(piece => heights[`${page.id}:${piece.index}`] ?? (32 + Math.ceil(richText(piece.node).length / Math.max(12, Math.floor(width / 16))) * 27 + (piece.origin ? 70 : 0)));
     for (const [index, piece] of pieces.entries()) {
       const size = sizes[index], following = piece.node.type === 'heading' ? sizes[index + 1] ?? 0 : 0;
-      if (current.length && used + size + following > height && current[current.length - 1].node.type !== 'heading') flush();
+      if (current.length && used + size + following > availableHeight) flush();
       current.push(piece); used += size;
     }
     if (current.length || !pieces.length) flush();

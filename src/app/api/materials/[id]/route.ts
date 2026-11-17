@@ -1,14 +1,15 @@
+import { withWorkspace } from '@/lib/workspace-scope';
 import { requirePrivateAccess } from '@/lib/private-access';
 import { NextResponse } from 'next/server';
 import { readdir, readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { db, dataDir } from '@/lib/db';
+import { db, getDataDir } from '@/lib/db';
 import { checkOrigin, errorResponse, publicMaterial } from '@/lib/server';
 import { conflictResolutionUpdate } from '@/lib/conflict-resolution';
 import { isExtracting } from '@/lib/extraction';
 
-export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function handlePATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -37,7 +38,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   } catch (error) { return errorResponse(error); }
 }
 
-export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function handleDELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -48,10 +49,10 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
 
     await db.material.delete({ where: { id } });
     let cleanupWarning = false;
-    const extractionPath = path.join(dataDir, 'extractions', `${id}.json`);
+    const extractionPath = path.join(getDataDir(), 'extractions', `${id}.json`);
     await unlink(extractionPath).catch(error => { if (error.code !== 'ENOENT') cleanupWarning = true; });
 
-    const generationDir = path.join(dataDir, 'generations');
+    const generationDir = path.join(getDataDir(), 'generations');
     const drafts = await readdir(generationDir).catch(error => { if (error.code !== 'ENOENT') cleanupWarning = true; return []; });
     for (const file of drafts) {
       if (!/^[a-f0-9-]{36}\.json$/.test(file)) continue;
@@ -62,10 +63,13 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       } catch { cleanupWarning = true; }
     }
 
-    const uploadsDir = path.join(dataDir, 'uploads');
+    const uploadsDir = path.join(getDataDir(), 'uploads');
     if (path.dirname(material.filePath) === uploadsDir && !await db.material.findFirst({ where: { filePath: material.filePath } })) {
       await unlink(material.filePath).catch(error => { if (error.code !== 'ENOENT') cleanupWarning = true; });
     }
     return NextResponse.json({ deleted: true, cleanupWarning });
   } catch (error) { return errorResponse(error); }
 }
+
+export const PATCH = withWorkspace(handlePATCH);
+export const DELETE = withWorkspace(handleDELETE);

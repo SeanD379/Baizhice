@@ -1,3 +1,4 @@
+import { withWorkspace } from '@/lib/workspace-scope';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requirePrivateAccess } from '@/lib/private-access';
@@ -23,12 +24,12 @@ const schema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('review-knowledge'), courseId: course, bankId: id, revision: z.number().int().positive(), questionIds: z.array(id).min(1).max(5) }),
 ]);
 const changes = z.object({ prompt: z.string().min(1).max(8000).optional(), context: z.string().max(40000).optional(), kind: z.enum(['single', 'multiple', 'judge', 'fill', 'term', 'short', 'calculation', 'essay', 'unknown']).optional(), options: z.array(z.object({ label: z.string().regex(/^[A-H]$/), text: z.string().max(4000) })).max(8).optional(), topics: z.array(z.string().min(1).max(80)).max(6).optional(), answer: z.string().max(8000).optional(), explanation: z.string().max(8000).optional(), criteria: z.array(z.string().max(1000)).max(12).optional() });
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try { checkOrigin(request); const courseId = course.parse(new URL(request.url).searchParams.get('courseId')); return NextResponse.json({ banks: await listQuestionBanks(courseId),imports:await questionImportReports(courseId), ...deepSeekConfig() },{headers:{'Cache-Control':'no-store'}}); }
   catch (error) { return errorResponse(error); }
 }
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request); const input = schema.parse(await request.json());
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ bank: await generateOriginalVariants(input.courseId, input.bankId, input.questionId, input.count) });
   } catch (error) { return errorResponse(error); }
 }
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -51,3 +52,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ bank });
   } catch (error) { return errorResponse(error); }
 }
+
+export const GET = withWorkspace(handleGET);
+export const POST = withWorkspace(handlePOST);
+export const PATCH = withWorkspace(handlePATCH);

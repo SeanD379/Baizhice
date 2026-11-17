@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Material } from '@prisma/client';
-import { db, dataDir } from './db';
+import { db, getDataDir } from './db';
 import { isExtracting, readExtraction } from './extraction';
 import { hashContent, validatePages, type GenerationPreview, type SourcePage } from './generation';
 import { deepSeekConfig } from './deepseek';
@@ -28,12 +28,12 @@ export async function generationSources(courseId:string,currentMaterials?:Materi
   return {...deepSeekConfig(),pages,unavailable};
 }
 export async function saveGeneration(draft:StoredGeneration) {
-  const directory=path.join(dataDir,'generations');await mkdir(directory,{recursive:true});
+  const directory=path.join(getDataDir(),'generations');await mkdir(directory,{recursive:true});
   await writeFile(path.join(directory,`${draft.id}.json`),JSON.stringify(draft),'utf8');
 }
 export async function readGeneration(id:string):Promise<StoredGeneration> {
   if(!/^[a-f0-9-]{36}$/.test(id))throw new Error('生成预览不存在。');
-  try {return JSON.parse(await readFile(path.join(dataDir,'generations',`${id}.json`),'utf8'));}
+  try {return JSON.parse(await readFile(path.join(getDataDir(),'generations',`${id}.json`),'utf8'));}
   catch {throw new Error('生成预览不可用，请重新生成。');}
 }
 
@@ -45,7 +45,7 @@ export function recoverGeneration(draft:StoredGeneration,courseId:string,expecte
 }
 export async function listGenerations(courseId:string,expectedVersionId:string|null,pages:SourcePage[]) {
   let files:string[];
-  try {files=await readdir(path.join(dataDir,'generations'));}
+  try {files=await readdir(path.join(getDataDir(),'generations'));}
   catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return [];throw error;}
   const previews=[];
   for(const file of files) {

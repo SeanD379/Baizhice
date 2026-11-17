@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { db } from './db';
+import { db, getDataDir } from './db';
 import { requestStructuredOutput } from './deepseek';
 import { hashContent } from './generation';
 import { readExtraction } from './extraction';
@@ -18,7 +18,7 @@ async function assertExamClosed(courseId: string, materialId: string) {
 type KnowledgePracticeResult = { bank: QuestionBankData; questionIds: string[] };
 const jobs: Map<string, Promise<KnowledgePracticeResult>> = (globalThis as unknown as { knowledgePracticeJobs?: Map<string, Promise<KnowledgePracticeResult>> }).knowledgePracticeJobs ??= new Map();
 export function generateKnowledgePractice(courseId: string, materialId: string, pageIds: string[], count = 5): Promise<KnowledgePracticeResult> {
-  const key = JSON.stringify([courseId, materialId, [...pageIds].sort(), count]), existing = jobs.get(key);
+  const key = JSON.stringify([getDataDir(), courseId, materialId, [...pageIds].sort(), count]), existing = jobs.get(key);
   if (existing) return existing;
   if (jobs.size >= 2) return Promise.reject(Error('已有出题任务，请稍后重试。'));
   const task = generateKnowledgeQuestions(courseId, materialId, pageIds, count).finally(() => jobs.delete(key));

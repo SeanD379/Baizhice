@@ -1,4 +1,6 @@
 'use client';
+import { withBasePath } from '@/lib/base-path';
+import { workspaceFetch } from '@/lib/workspace-storage';
 import { useState } from 'react';
 import { Button } from './ui/button';
 import { Markdown } from './markdown';
@@ -7,10 +9,10 @@ import type { PracticeHistoryData } from '@/lib/practice-history';
 
 export function PracticeHistory({courseId}:{courseId:string}) {
   const [data,setData]=useState<PracticeHistoryData|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
-  const url=`/api/practice/history?courseId=${encodeURIComponent(courseId)}`;
+  const url=withBasePath(`/api/practice/history?courseId=${encodeURIComponent(courseId)}`);
   async function load(){
     setBusy(true);setError('');
-    try {const response=await fetch(url,{cache:'no-store'});const result=await response.json();if(!response.ok)throw new Error(result.error);setData(result);}
+    try {const response=await workspaceFetch(url,{cache:'no-store'});const result=await response.json();if(!response.ok)throw new Error(result.error);setData(result);}
     catch(e){setError(e instanceof Error?e.message:'读取历史失败，请重试。');}finally{setBusy(false);}
   }
   return <details className="home-card" onToggle={e=>{if(e.currentTarget.open)void load();}}><summary>历史题组与作答（只读）</summary>

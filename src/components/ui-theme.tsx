@@ -1,15 +1,18 @@
 'use client';
 
-import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type MouseEvent } from 'react';
+import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { Moon, Sun } from 'lucide-react';
 import { themeStorageKey, type ThemeMode } from '@/lib/ui-theme';
 import { Button } from './ui/button';
+import { useUserPreferences } from './user-preferences';
 
-const ThemeContext = createContext<{ theme: ThemeMode; setTheme: (theme: ThemeMode) => void }>({ theme: 'light', setTheme: () => {} });
+const ThemeContext = createContext<{ theme: ThemeMode; setTheme: (theme: ThemeMode) => boolean; toggleTheme: (anchor: HTMLElement) => void }>({ theme: 'light', setTheme: () => false, toggleTheme: () => {} });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<ThemeMode>('light');
+  const { reducedMotion: preferenceReducedMotion, reportStorageError, clearStorageError } = useUserPreferences();
+  const activeTransition = useRef<{ target: ThemeMode; view?: ViewTransition; animation?: Animation; cleanup?: () => void } | null>(null);
   useLayoutEffect(() => {
     let initial: ThemeMode = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
     try {
@@ -19,48 +22,42 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     document.documentElement.dataset.theme = initial;
     setThemeState(initial);
   }, []);
-  const setTheme = useCallback((next: ThemeMode) => {
+  const commitTheme = useCallback((next: ThemeMode) => {
     document.documentElement.dataset.theme = next;
     setThemeState(next);
-    try { window.localStorage.setItem(themeStorageKey, next); } catch { /* Theme switching still works without browser storage. */ }
-  }, []);
-  return <ThemeContext.Provider value={{ theme, setTheme }}>{children}</ThemeContext.Provider>;
-}
-
-export const useTheme = () => useContext(ThemeContext);
-
-export function ThemeToggle() {
-  const { theme, setTheme } = useTheme();
-  const activeTransition = useRef<{ target: ThemeMode; view?: ViewTransition; animation?: Animation; cleanup?: () => void } | null>(null);
-  useLayoutEffect(() => () => {
-    activeTransition.current?.cleanup?.();
-    activeTransition.current?.animation?.cancel();
-    activeTransition.current?.view?.skipTransition();
+    try { window.localStorage.setItem(themeStorageKey, next); clearStorageError(); return true; } catch { reportStorageError(); return false; }
+  }, [reportStorageError, clearStorageError]);
+  const stopTransition = useCallback(() => {
+    const active = activeTransition.current;
     activeTransition.current = null;
+    active?.cleanup?.();
+    active?.animation?.cancel();
+    active?.view?.skipTransition();
     document.documentElement.removeAttribute('data-theme-transition');
   }, []);
-  const toggle = (event: MouseEvent<HTMLButtonElement>) => {
+  const setTheme = useCallback((next: ThemeMode) => { stopTransition(); return commitTheme(next); }, [stopTransition, commitTheme]);
+  useLayoutEffect(() => stopTransition, [stopTransition]);
+  const toggleTheme = (button: HTMLElement) => {
     const active = activeTransition.current;
     const next = (active?.target ?? theme) === 'light' ? 'dark' : 'light';
     if (active) {
       active.target = next;
-      flushSync(() => setTheme(next));
+      flushSync(() => commitTheme(next));
       if (active.animation && active.animation.playState !== 'finished') active.animation.reverse();
       else active.view?.skipTransition();
       return;
     }
     if (!document.startViewTransition) {
-      setTheme(next);
+      commitTheme(next);
       return;
     }
     const root = document.documentElement;
-    const button = event.currentTarget;
     const { left, top, width, height } = button.getBoundingClientRect();
     const x = left + width / 2;
     const y = top + height / 2;
     const radius = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y)) + 1;
     const circle = [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`];
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const reducedMotion = preferenceReducedMotion || (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
     const current: NonNullable<typeof activeTransition.current> = { target: next };
     activeTransition.current = current;
     // Snapshot participants cannot receive pointer hits in some browsers.
@@ -75,7 +72,7 @@ export function ThemeToggle() {
     document.addEventListener('click', forwardClick);
     current.cleanup = () => document.removeEventListener('click', forwardClick);
     root.dataset.themeTransition = next;
-    const view = document.startViewTransition(() => flushSync(() => setTheme(current.target)));
+    const view = document.startViewTransition(() => { if (activeTransition.current === current) flushSync(() => commitTheme(current.target)); });
     current.view = view;
     void view.ready.then(() => {
       if (activeTransition.current !== current) return;
@@ -96,8 +93,15 @@ export function ThemeToggle() {
     };
     void view.finished.then(clear, clear);
   };
+  return <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>{children}</ThemeContext.Provider>;
+}
+
+export const useTheme = () => useContext(ThemeContext);
+
+export function ThemeToggle() {
+  const { theme, toggleTheme } = useTheme();
   const action = theme === 'light' ? '切换到夜间模式' : '切换到白天模式';
-  return <Button className="theme-toggle" variant="ghost" aria-label={action} title={action} onClick={toggle}>
+  return <Button className="theme-toggle" variant="ghost" aria-label={action} title={action} onClick={event => toggleTheme(event.currentTarget)}>
     {theme === 'light' ? <Moon size={17}/> : <Sun size={17}/>}<span>{theme === 'light' ? '白天模式' : '夜间模式'}</span>
   </Button>;
 }

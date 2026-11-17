@@ -1,3 +1,5 @@
+import { withBasePath } from './base-path';
+
 export type PracticeArea = 'knowledge' | 'mistakes' | 'papers';
 export type PracticeBackAction = { label:string; onClick:()=>void };
 export type PracticeActivity = 'sources' | 'file' | 'organize' | 'practice' | 'ai' | 'favorites' | 'mistakes' | 'history' | 'daily' | 'notes' | 'analysis' | 'variants' | 'generated';
@@ -39,7 +41,7 @@ export function practiceLocation(courseId: string, location: PracticeLocation): 
   if (location.legacy) params.set('legacy', '1');
   if (location.variant) params.set('variant', '1');
   if (location.fromFile) params.set('from', 'file');
-  return '/?' + params.toString();
+  return withBasePath('/?' + params.toString());
 }
 export const questionRefKey = (ref: QuestionRef): string => JSON.stringify([ref.engine, ref.questionId, ref.materialId || '', ref.versionId || '', ref.setId || '']);
 export function mistakeFiles(catalog: StudyQuestion[], materials: HubMaterial[]) {

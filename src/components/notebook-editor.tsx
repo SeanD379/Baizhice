@@ -1,4 +1,5 @@
 'use client';
+import { withBasePath } from '@/lib/base-path';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -23,7 +24,7 @@ const NotebookImage = Image.extend({
     const dom = window.document.createElement('img'); dom.alt = node.attrs.alt ?? '笔记图片';
     let objectUrl = '', disposed = false;
     if (String(node.attrs.src).startsWith('notebook-local:')) void localImageBlob(node.attrs.src).then(blob => { if (blob && !disposed) { objectUrl = URL.createObjectURL(blob); dom.src = objectUrl; } });
-    else dom.src = node.attrs.src;
+    else dom.src = withBasePath(String(node.attrs.src));
     return { dom, destroy() { disposed = true; if (objectUrl) URL.revokeObjectURL(objectUrl); } };
   }; },
 });

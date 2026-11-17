@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 vi.mock('./db',async()=>{
   const fs=await import('node:fs/promises'),path=await import('node:path');await fs.mkdir('tmp',{recursive:true});const dataDir=await fs.mkdtemp(path.resolve('tmp/auto-import-'));
-  return {dataDir,db:{material:{findUnique:vi.fn(),findMany:vi.fn()}}};
+  return {dataDir,getDataDir:()=>dataDir,db:{material:{findUnique:vi.fn(),findMany:vi.fn()}}};
 });
 vi.mock('./extraction',()=>({readExtraction:vi.fn(),extractMaterial:vi.fn()}));
 vi.mock('./question-bank-store',()=>({prepareQuestionBanks:vi.fn()}));

@@ -1,4 +1,5 @@
 'use client';
+import { workspaceLocalStorage } from '@/lib/workspace-storage';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, CheckCheck, ChevronLeft, ChevronRight, CircleAlert, FileText, List, PanelLeft, PencilLine, Settings2 } from 'lucide-react';
@@ -125,8 +126,8 @@ export function OutlineNotebook({ courseName, version, drafts, dirty, hasGenerat
 
   useEffect(() => {
     try {
-      setPreferences(safePreferences(window.localStorage.getItem(preferencesKey)));
-      const savedPage = Number(window.localStorage.getItem(pageKey));
+      setPreferences(safePreferences(workspaceLocalStorage.getItem(preferencesKey)));
+      const savedPage = Number(workspaceLocalStorage.getItem(pageKey));
       if (Number.isInteger(savedPage) && savedPage >= 0) setPageIndex(Math.min(savedPage, pages.length - 1));
     } catch { /* Reading remains available without browser storage. */ }
   }, [pageKey, pages.length]);
@@ -143,7 +144,7 @@ export function OutlineNotebook({ courseName, version, drafts, dirty, hasGenerat
   }, [preferences.pinnedToc]);
 
   useEffect(() => {
-    try { window.localStorage.setItem(preferencesKey, JSON.stringify(preferences)); } catch { /* Preferences are optional. */ }
+    try { workspaceLocalStorage.setItem(preferencesKey, JSON.stringify(preferences)); } catch { /* Preferences are optional. */ }
   }, [preferences]);
 
   useEffect(() => {
@@ -151,7 +152,7 @@ export function OutlineNotebook({ courseName, version, drafts, dirty, hasGenerat
   }, [pages.length]);
 
   useEffect(() => {
-    try { window.localStorage.setItem(pageKey, String(pageIndex)); } catch { /* Reading position is optional. */ }
+    try { workspaceLocalStorage.setItem(pageKey, String(pageIndex)); } catch { /* Reading position is optional. */ }
   }, [pageIndex, pageKey]);
 
   function goTo(index: number) {

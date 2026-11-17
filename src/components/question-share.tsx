@@ -1,4 +1,5 @@
 'use client';
+import { withBasePath } from '@/lib/base-path';
 import { useEffect, useRef, useState } from 'react';
 import type { OriginalQuestion } from '@/lib/question-bank-types';
 import { originalKindNames } from '@/lib/question-bank-types';
@@ -11,7 +12,7 @@ function ShareContent({question,includeAnswer}:{question:OriginalQuestion;includ
     <header><span>学习资料 · {question.origin==='variant'?'AI 自编变式':'原题'}</span><small>{originalKindNames[question.kind]} · 第 {question.number} 题</small></header>
     {question.context&&<div className="original-context"><Markdown text={question.context}/></div>}
     <Markdown text={question.prompt}/>
-    {question.media?.map((media,i)=><figure key={i}><img src={media.url} alt={media.label}/><figcaption>{media.label}</figcaption></figure>)}
+    {question.media?.map((media,i)=><figure key={i}><img src={withBasePath(media.url)} alt={media.label}/><figcaption>{media.label}</figcaption></figure>)}
     {question.options.map(option=><div className="question-share-option" key={option.label}><b>{option.label}.</b><Markdown text={option.text}/></div>)}
     {includeAnswer&&<section className="question-share-solution"><h3>参考答案{question.answerSource==='ai'?'（AI 参考）':''}</h3><Markdown text={question.answer||'尚无可用参考答案，待核对。'}/>{question.explanation&&<><h3>解析</h3><Markdown text={question.explanation}/></>}{!!question.criteria.length&&<><h3>评分要点</h3><ul>{question.criteria.map((item,i)=><li key={i}>{item}</li>)}</ul></>}{!!question.warnings.length&&<p>{question.warnings.join(' ')}</p>}</section>}
   </div>;

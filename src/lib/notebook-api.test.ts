@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 vi.mock('./db', async () => {
   const { PrismaClient } = await import('@prisma/client'), fs = await import('node:fs/promises'), path = await import('node:path');
   await fs.mkdir('tmp', { recursive: true }); const dataDir = await fs.mkdtemp(path.resolve('tmp/notebook-api-'));
-  return { dataDir, db: new PrismaClient({ datasources: { db: { url: `file:${path.join(dataDir, 'test.db').replaceAll('\\', '/')}` } } }) };
+  return { dataDir,getDataDir:()=>dataDir, db: new PrismaClient({ datasources: { db: { url: `file:${path.join(dataDir, 'test.db').replaceAll('\\', '/')}` } } }) };
 });
 import { db } from './db';
 import { adoptNotebookSections, getNotebook } from './notebook-store';

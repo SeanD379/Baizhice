@@ -1,9 +1,10 @@
 'use client';
+import { workspaceLocalStorage } from '@/lib/workspace-storage';
 import { useEffect,useRef,useState,type RefObject } from 'react';
 export function useLibrarySplit(courseId:string) {
   const [share,setShare]=useState(0.35),previous=useRef(0.35),key=`lms.library.split:${courseId}`;
-  useEffect(()=>{try{previous.current=Number(localStorage.getItem(`${key}:expanded`)??'0.35')||0.35;const saved=Number(localStorage.getItem(key)??'0.35');if(Number.isFinite(saved)&&saved>=0&&saved<=1){setShare(saved);if(saved>0&&saved<1)previous.current=saved;}}catch{/* The splitter also works without browser storage. */}},[key]);
-  function resize(value:number){const next=Math.min(1,Math.max(0,value));if(next>0&&next<1)previous.current=next;setShare(next);try{localStorage.setItem(key,String(next));localStorage.setItem(`${key}:expanded`,String(previous.current));}catch{/* Preserve this visit's layout. */}}
+  useEffect(()=>{try{previous.current=Number(workspaceLocalStorage.getItem(`${key}:expanded`)??'0.35')||0.35;const saved=Number(workspaceLocalStorage.getItem(key)??'0.35');if(Number.isFinite(saved)&&saved>=0&&saved<=1){setShare(saved);if(saved>0&&saved<1)previous.current=saved;}}catch{/* The splitter also works without browser storage. */}},[key]);
+  function resize(value:number){const next=Math.min(1,Math.max(0,value));if(next>0&&next<1)previous.current=next;setShare(next);try{workspaceLocalStorage.setItem(key,String(next));workspaceLocalStorage.setItem(`${key}:expanded`,String(previous.current));}catch{/* Preserve this visit's layout. */}}
   const restore=()=>resize(previous.current);
   return {share,resize,restore};
 }

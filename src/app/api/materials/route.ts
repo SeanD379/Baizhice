@@ -1,3 +1,4 @@
+import { withWorkspace } from '@/lib/workspace-scope';
 import { requirePrivateAccess } from '@/lib/private-access';
 import { NextResponse } from 'next/server';
 import { checkOrigin, errorResponse, publicMaterial } from '@/lib/server';
@@ -7,7 +8,7 @@ import { storeMaterial } from '@/lib/material-import';
 import { MAX_UPLOAD_BYTES } from '@/lib/upload-format';
 
 export const runtime = 'nodejs';
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -28,7 +29,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ materials: materials.map(publicMaterial) });
   } catch (error) { return errorResponse(error); }
 }
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const denied = await requirePrivateAccess(request); if (denied) return denied;
   try {
     checkOrigin(request);
@@ -39,3 +40,6 @@ export async function POST(request: Request) {
     return NextResponse.json(await storeMaterial(Buffer.from(await file.arrayBuffer()), file.name, courseId));
   } catch (error) { return errorResponse(error); }
 }
+
+export const PATCH = withWorkspace(handlePATCH);
+export const POST = withWorkspace(handlePOST);
